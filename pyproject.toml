@@ -10,8 +10,16 @@ dependencies = [
     "scikit-learn>=1.4",
 ]
 
+[project.optional-dependencies]
+mcp = [
+    "mcp>=2.3.0",
+]
+
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "mcp>=2.3.0",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]
