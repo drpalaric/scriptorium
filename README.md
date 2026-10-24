@@ -2,14 +2,14 @@
 
 Policy-as-code and control mapping for AI governance. Public data only; no employer material.
 
-**Status: Stage 1 (scaffold and data ingestion).** No models have been trained and no LLM has been called. This README reports no accuracy numbers because none exist yet. Results will be added only after real runs.
+**Status: Stage 2 (scikit-learn baseline).** The only measured results so far are the scikit-learn baseline below. No LLM has been called, and no LLM results exist yet. Results are added only after real runs.
 
 ## Planned components
 
 | Layer | Tooling | Status |
 |---|---|---|
 | Data: NIST SP 800-53 rev5 requirement text labelled by control family | OSCAL catalog, `scriptorium.ingest` | Stage 1 |
-| Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Not started |
+| Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Stage 2, results below |
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
 | Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Not started |
@@ -29,6 +29,23 @@ uv run python -m scriptorium.ingest build
 ```
 
 Each active control or enhancement is one record: statement text with control IDs replaced by `[control]`, labelled with its family. Withdrawn controls are dropped. The train/test split is stratified by family and grouped by base control (`AC-2` and `AC-2(1)` stay together), frozen with a fixed seed.
+
+## Baseline results (scikit-learn)
+
+TF-IDF (word unigrams, sublinear tf) + linear SVM (C=10, balanced class weights). The configuration was chosen by grouped 5-fold cross-validation (by base control) on the training split only, from 32 candidates. The held-out test split was evaluated once. Full numbers: [`results/baseline_metrics.json`](results/baseline_metrics.json). Reproduce with `uv run python -m scriptorium.baseline`.
+
+| | Value | 95% CI (bootstrap over base controls) |
+|---|---|---|
+| Test accuracy (184 records, 20 families) | 0.522 | 0.420 to 0.630 |
+| Test macro-F1 | 0.503 | 0.363 to 0.560 |
+| Majority-class accuracy | 0.060 | |
+| Cross-validation macro-F1 (train, selected config) | 0.523 | |
+
+How to read this:
+- The model is far above chance (20 families) but wrong about half the time. Family is a coarse label, and controls in different families often share vocabulary; I have not analyzed which families are confused with which beyond spot checks.
+- Several families score 0 on the test set (CA, PL, PS, RA). Per-family scores rest on very few test records: AT has 1, MA and PS have 2, MP and SR have 3, PL and PT have 4. Families with fewer than 5 test records are flagged `low_support` in the JSON and should not be read as reliable.
+- Cross-validation and test scores agree closely, which suggests the model was not tuned to the test split.
+- Family prediction is a stand-in for control mapping. It does not show the model can pick the exact control.
 
 ## Optional: Secure Controls Framework (SCF)
 
