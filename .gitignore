@@ -10,6 +10,9 @@ dist/
 # data/manifest.json records its commit SHA and SHA-256.
 data/raw/
 
+# Optional local-only SCF input and outputs; never commit (see README)
+data/scf/
+
 # Secrets and local eval state
 .env
 .env.*

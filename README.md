@@ -30,6 +30,17 @@ uv run python -m scriptorium.ingest build
 
 Each active control or enhancement is one record: statement text with control IDs replaced by `[control]`, labelled with its family. Withdrawn controls are dropped. The train/test split is stratified by family and grouped by base control (`AC-2` and `AC-2(1)` stay together), frozen with a fixed seed.
 
+## Optional: Secure Controls Framework (SCF)
+
+Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, for example to explore crosswalks to other frameworks. This is an example input, not part of the core pipeline, and it is not implemented yet.
+
+- **Nothing from SCF is in this repository.** No SCF control text, mappings, derived datasets, or text generated from SCF content is committed, cached for replay, or published on the project site. Outputs from SCF input are written to `data/scf/`, which is gitignored.
+- **The repository contains code only.** The loader takes a path to a file you obtained from SCF. Tests use synthetic fixtures with made-up IDs.
+- **SCF's terms apply to you.** The SCF is published by the Secure Controls Framework Council under a license based on CC BY-ND 4.0, with additional terms on its [terms page](https://securecontrolsframework.com/terms-conditions). Read them before using SCF content, especially the terms on derivative works and on using AI with SCF content. This project does not grant any rights to SCF content, and its MIT license covers the code only.
+- **Attribution.** Secure Controls Framework® (SCF) is a registered mark and copyright of the Secure Controls Framework Council, LLC. This project is not affiliated with or endorsed by the SCF Council.
+
+The data this project publishes and reports on comes from NIST SP 800-53 Rev 5 (OSCAL), a U.S. government work.
+
 ## Development
 
 ```bash
