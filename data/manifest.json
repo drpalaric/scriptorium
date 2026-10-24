@@ -1,0 +1,73 @@
+{
+ "source": {
+  "repo": "https://github.com/usnistgov/oscal-content",
+  "commit": "f0de6d8d8c059d374f15e0ae07508d82e370fc1d",
+  "path": "nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
+  "sha256": "64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb",
+  "oscal_version": "1.2.3",
+  "catalog_version": "5.2.0"
+ },
+ "split": {
+  "seed": 20260424,
+  "test_fraction": 0.2,
+  "grouped_by": "base_id",
+  "stratified_by": "family"
+ },
+ "counts": {
+  "records": 1014,
+  "withdrawn_dropped": 182,
+  "train": 830,
+  "test": 184,
+  "base_controls_train": 240,
+  "base_controls_test": 60,
+  "train_by_family": {
+   "AC": 120,
+   "AT": 14,
+   "AU": 50,
+   "CA": 19,
+   "CM": 47,
+   "CP": 37,
+   "IA": 48,
+   "IR": 22,
+   "MA": 26,
+   "MP": 17,
+   "PE": 41,
+   "PL": 7,
+   "PM": 31,
+   "PS": 15,
+   "PT": 17,
+   "RA": 11,
+   "SA": 94,
+   "SC": 109,
+   "SI": 81,
+   "SR": 24
+  },
+  "test_by_family": {
+   "AC": 11,
+   "AT": 1,
+   "AU": 6,
+   "CA": 6,
+   "CM": 9,
+   "CP": 12,
+   "IA": 11,
+   "IR": 18,
+   "MA": 2,
+   "MP": 3,
+   "PE": 10,
+   "PL": 4,
+   "PM": 6,
+   "PS": 2,
+   "PT": 4,
+   "RA": 11,
+   "SA": 14,
+   "SC": 30,
+   "SI": 21,
+   "SR": 3
+  }
+ },
+ "outputs": {
+  "train.jsonl": "dd5bb0e5c4fdc0c80bb408a7e7ceddd5f0249281d571a7b5550812fbbc8a47ae",
+  "test.jsonl": "ccf43b1cc5003f0bce2e7bc0cb60cce7742bed784c68a78ad25efaf88b9bc3a4",
+  "split.json": "4d1948479e4c392ab3a06bfef455af777b8c1f00df82ad34df930d5d0d563518"
+ }
+}

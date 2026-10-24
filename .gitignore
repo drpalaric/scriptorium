@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+.DS_Store
+
+# Raw upstream catalog: re-fetch with `python -m scriptorium.ingest fetch`.
+# data/manifest.json records its commit SHA and SHA-256.
+data/raw/
+
+# Secrets and local eval state
+.env
+.env.*
