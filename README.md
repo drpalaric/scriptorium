@@ -49,7 +49,17 @@ How to read this:
 
 ## Optional: Secure Controls Framework (SCF)
 
-Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, for example to explore crosswalks to other frameworks. This is an example input, not part of the core pipeline, and it is not implemented yet.
+Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, to classify requirements into SCF domains and to map between SCF and NIST. This is an optional input, not part of the core pipeline.
+
+```bash
+uv run python -m scriptorium.scf build --catalog /path/to/oscal-catalog.json   # writes to ~/.scriptorium/scf/
+uv run python -m scriptorium.baseline --dataset scf                            # domain classifier, results stay local
+uv run python -m scriptorium.crosswalk                                         # SCF <-> NIST retrieval, scored against the file's own NIST mappings
+```
+
+- `scriptorium.scf` reads the OSCAL form of the SCF catalog (statement text as input, domain as label, orphaned controls dropped). Everything it writes goes under `~/.scriptorium/` (or `$SCRIPTORIUM_HOME`), never into this repository.
+- `scriptorium.crosswalk` ranks controls in one catalog by TF-IDF similarity to a control in the other, with no training, and scores the ranking against the NIST 800-53 Rev 5.2 mappings contained in your SCF file. A test shuffles those mappings and confirms the score falls to chance. **Results from SCF input are not published here.** Run it yourself to get numbers for your copy. Agreement with the SCF's own crosswalk is not the same as a mapping being correct.
+- A test fails if any SCF-derived data is tracked in git.
 
 - **Nothing from SCF is in this repository.** No SCF control text, mappings, derived datasets, or text generated from SCF content is committed, cached for replay, or published on the project site. Outputs from SCF input are written to `data/scf/`, which is gitignored.
 - **The repository contains code only.** The loader takes a path to a file you obtained from SCF. Tests use synthetic fixtures with made-up IDs.

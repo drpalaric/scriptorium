@@ -168,7 +168,7 @@ def split_bases(records: list[dict[str, Any]], seed: int = SEED, test_fraction: 
     return {"train": sorted(train), "test": sorted(test)}
 
 
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(r, sort_keys=True, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
 
 
@@ -185,7 +185,7 @@ def build(raw_path: Path = RAW_PATH, out_dir: Path = PROCESSED_DIR, manifest_pat
     out_dir.mkdir(parents=True, exist_ok=True)
     files = {"train.jsonl": train, "test.jsonl": test}
     for name, rows in files.items():
-        _write_jsonl(out_dir / name, rows)
+        write_jsonl(out_dir / name, rows)
     (out_dir / "split.json").write_text(
         json.dumps({"seed": SEED, "test_fraction": TEST_FRACTION, **split}, indent=1) + "\n", encoding="utf-8"
     )

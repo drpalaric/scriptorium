@@ -3,7 +3,8 @@
 Tuning uses grouped cross-validation on the training split only. The held-out test
 split is read once, after the configuration is fixed.
 
-    python -m scriptorium.baseline
+    python -m scriptorium.baseline              # NIST (writes results/baseline_metrics.json)
+    python -m scriptorium.baseline --dataset scf  # local SCF dataset (results stay under ~/.scriptorium)
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 
-from scriptorium import ingest
+from scriptorium import ingest, paths
 
 SEED = ingest.SEED
 N_FOLDS = 5
@@ -153,7 +154,8 @@ def run(processed_dir: Path = ingest.PROCESSED_DIR, manifest_path: Path = ingest
         "n_test": len(test),
         "test": result,
         "provenance": {
-            "source_commit": manifest["source"]["commit"],
+            "source_commit": manifest["source"].get("commit"),
+            "source_sha256": manifest["source"]["sha256"],
             "train_sha256": manifest["outputs"]["train.jsonl"],
             "test_sha256": manifest["outputs"]["test.jsonl"],
             "scikit_learn": sklearn.__version__,
@@ -164,16 +166,24 @@ def run(processed_dir: Path = ingest.PROCESSED_DIR, manifest_path: Path = ingest
 
 
 def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args(argv)
-    out = run()
-    model = out.pop("_model")
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dataset", choices=["nist", "scf"], default="nist")
+    args = ap.parse_args(argv)
+    if args.dataset == "scf":
+        data_dir = paths.scf_dir()
+        out = run(data_dir, data_dir / "manifest.json")
+        results_path = data_dir / "results" / "baseline_metrics.json"
+    else:
+        out = run()
+        results_path = RESULTS_PATH
+    out.pop("_model")
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    results_path.write_text(json.dumps(out, indent=1) + "\n", encoding="utf-8")
     t = out["test"]
     print(f"{out['model']}  config={out['selected_config']}")
     print(f"test accuracy {t['accuracy']:.3f} {t['ci95']['accuracy']}  macro-F1 {t['macro_f1']:.3f} {t['ci95']['macro_f1']}")
     print(f"majority-class accuracy {t['majority_class_baseline']['accuracy']:.3f}")
-    print(f"wrote {RESULTS_PATH}")
+    print(f"wrote {results_path}")
     return 0
 
 
