@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 from scriptorium import baseline, ingest, paths
-from scriptorium.evals import cis_cli, context, mapping, splits
-from scriptorium.evals.budget import Budget, estimate_tokens_offline, price_for
+from scriptorium.evals import cis_cli, context, injection, mapping, splits
+from scriptorium.evals.budget import Budget, EST_OUTPUT_BY_EFFORT, price_for, projected_cost
 from scriptorium.evals.llm import AnthropicClient, CachedClient, EFFORTS, LazyClient, LLMError, ResponseCache, THINKING_MODES, cache_key
 from scriptorium.evals.prompts import load_prompt
 from scriptorium.evals.report import build_report, render_markdown, write_report
@@ -68,6 +68,7 @@ def _args(argv):
     r.add_argument("--workspace-id", default=None, help="needed when the API key is not scoped to a workspace (or set ANTHROPIC_WORKSPACE_ID)")
     r.add_argument("--out", type=Path, default=None, help="report directory (default: ~/.scriptorium/evals/reports)")
     cis_cli.add_parser(sub)
+    injection.add_parser(sub)
     c = sub.add_parser("compare", help="paired comparison of two cached runs (no API call)")
     _common(c)
     c.add_argument("--a", required=True, help="reference prompt version")
@@ -96,13 +97,12 @@ def _prepare(a, prompt_version: str):
 
 
 def _plan(model, task, prompt, reqs, cache: ResponseCache) -> dict:
-    p = price_for(model)  # refuses unpriced models
+    price_for(model)  # refuses unpriced models
     cached = sum(1 for q in reqs if cache.get(cache_key(q, task, prompt.version, prompt.sha256)) is not None)
     todo = len(reqs) - cached
-    per_in = int(sum(estimate_tokens_offline(q.system + q.user) for q in reqs) / len(reqs)) + SCHEMA_OVERHEAD_TOKENS
-    projected = todo * (per_in * p.input + EST_OUTPUT_TOKENS * p.output) / 1_000_000
+    projected, per_in = projected_cost(model, reqs, todo, schema_overhead_tokens=SCHEMA_OVERHEAD_TOKENS)
     return {"items": len(reqs), "cached": cached, "to_call": todo, "est_input_tokens_per_call": per_in,
-            "est_output_tokens_per_call": EST_OUTPUT_TOKENS, "projected_usd": round(projected, 4)}
+            "est_output_tokens_per_call": EST_OUTPUT_BY_EFFORT.get(reqs[0].effort, 300), "projected_usd": round(projected, 4)}
 
 
 def _cmd_compare(a) -> int:
@@ -134,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     a = _args(argv)
     if a.cmd == "cis":
         return cis_cli.run(a)
+    if a.cmd == "injection":
+        return injection.run(a)
     try:
         if a.cmd == "compare":
             return _cmd_compare(a)

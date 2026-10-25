@@ -17,7 +17,7 @@ from typing import Any
 from scriptorium import baseline, ingest, paths
 from scriptorium.crosswalks import MappingStore
 from scriptorium.evals import cis, mapping
-from scriptorium.evals.budget import Budget, estimate_tokens_offline, price_for
+from scriptorium.evals.budget import Budget, price_for, projected_cost
 from scriptorium.evals.llm import AnthropicClient, CachedClient, EFFORTS, LazyClient, LLMError, LLMRequest, ResponseCache, THINKING_MODES, cache_key
 from scriptorium.evals.prompts import load_prompt
 
@@ -91,11 +91,10 @@ def run(a, default_cache: Path | None = None) -> int:
         schema = mapping.json_schema(codes)
         reqs = [LLMRequest(a.model, system, m, schema, a.max_tokens, a.effort, a.thinking) for m in cis.user_messages(items)]
         cache = ResponseCache(a.cache or (paths.scriptorium_home() / "evals" / "cache.db"))
-        p = price_for(a.model)
+        price_for(a.model)  # refuses unpriced models
         cached = sum(1 for q in reqs if cache.get(cache_key(q, task, prompt.version, prompt.sha256)) is not None)
         todo = len(reqs) - cached
-        per_in = int(sum(estimate_tokens_offline(q.system + q.user) for q in reqs) / len(reqs)) + 120
-        projected = todo * (per_in * p.input + EST_OUTPUT_TOKENS * p.output) / 1_000_000
+        projected, _ = projected_cost(a.model, reqs, todo)
     except (ValueError, FileNotFoundError, RuntimeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
