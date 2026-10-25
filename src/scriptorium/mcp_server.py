@@ -10,8 +10,6 @@ admin operations in the CLI, so no client can change a model.
 
 from __future__ import annotations
 
-import time
-from collections import deque
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -20,6 +18,7 @@ from mcp.types import ToolAnnotations
 
 from scriptorium import feedback as fb
 from scriptorium.feedback import FeedbackError
+from scriptorium.ratelimit import RateLimited, RateLimiter
 from scriptorium.service import Service, ServiceError
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -27,20 +26,6 @@ APPEND_ONLY = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempot
 WITHDRAW = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 SUBMITTER = "mcp"
 SUBMITS_PER_MINUTE = 20
-
-
-class RateLimiter:
-    def __init__(self, limit: int, window: float = 60.0, clock=time.monotonic):
-        self.limit, self.window, self.clock = limit, window, clock
-        self.hits: deque[float] = deque()
-
-    def check(self) -> None:
-        now = self.clock()
-        while self.hits and now - self.hits[0] > self.window:
-            self.hits.popleft()
-        if len(self.hits) >= self.limit:
-            raise ToolError(f"too many submissions; limit is {self.limit} per minute")
-        self.hits.append(now)
 
 
 def build_server(service: Service | None = None, limiter: RateLimiter | None = None) -> MCPServer:
@@ -94,7 +79,10 @@ def build_server(service: Service | None = None, limiter: RateLimiter | None = N
     def submit_feedback(text: str, label: str, catalog: str = "nist") -> dict[str, Any]:
         """Queue a correction: `text` should be classified as `label` in `catalog`. Returns a receipt with an id.
         The correction stays pending until an administrator approves and applies it; it does not change the model."""
-        limiter.check()
+        try:
+            limiter.check()
+        except RateLimited as e:
+            raise ToolError(str(e)) from None
         return guarded(fb.submit, svc, store(), catalog, text, label, SUBMITTER)
 
     @server.tool(annotations=READ_ONLY)

@@ -29,6 +29,8 @@ import json
 import os
 import sqlite3
 import sys
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,9 +114,11 @@ def append_event(
 
 
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, anchors_path: Path | None = None):
         self.path = Path(path)
+        self.anchors_path = Path(anchors_path) if anchors_path else self.path.parent / "anchors.jsonl"
         self._ready = False
+        self._init_lock = threading.Lock()
 
     def exists(self) -> bool:
         return self.path.exists()
@@ -131,18 +135,32 @@ class Database:
         self._prepare_file()
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
         if not self._ready:
-            conn.executescript(SCHEMA)
-            conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
-            self._ready = True
+            with self._init_lock:  # first use only: switching to WAL needs exclusive access
+                if not self._ready:
+                    self._init(conn)
+                    self._ready = True
         for suffix in ("-wal", "-shm"):
             side = Path(str(self.path) + suffix)
             if side.exists():
                 os.chmod(side, 0o600)
         return conn
+
+    @staticmethod
+    def _init(conn: sqlite3.Connection) -> None:
+        """One-time setup. WAL mode persists in the file; other processes may be doing the same, so retry if busy."""
+        for attempt in range(60):
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.executescript(SCHEMA)
+                conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e) or attempt == 59:
+                    raise
+                time.sleep(0.1)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -196,7 +214,7 @@ class Database:
                 problems.append(f"seq {r['seq']}: content does not match its hash")
             prev, head_seq = r["hash"], r["seq"]
         anchors_checked = 0
-        ap = anchors_path if anchors_path is not None else paths.anchors_path()
+        ap = anchors_path if anchors_path is not None else self.anchors_path
         if ap.exists():
             for n, line in enumerate(ap.read_text(encoding="utf-8").splitlines(), start=1):
                 if not line.strip():
@@ -224,7 +242,7 @@ class Database:
         v = self.verify(anchors_path)
         if not v["ok"]:
             raise DatabaseError("refusing to anchor a chain that fails verification: " + "; ".join(v["problems"][:3]))
-        ap = anchors_path if anchors_path is not None else paths.anchors_path()
+        ap = anchors_path if anchors_path is not None else self.anchors_path
         ap.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         entry = {"ts": now(), "seq": v["head_seq"], "hash": v["head_hash"]}
         fd = os.open(ap, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)

@@ -98,7 +98,7 @@ Security properties, each covered by a test:
 
 ## Corrections (feedback) with approval and rollback
 
-Users can submit corrections ("that's not AC, it's IA"). A correction changes the model only after an admin approves it and applies it, and only if the frozen held-out score does not drop. Everything is local, under `~/.scriptorium/feedback/`.
+Users can submit corrections ("that's not AC, it's IA"). A correction changes the model only after an admin approves it and applies it, and only if the frozen held-out score does not drop. Everything is local, under the local database (`~/.scriptorium/scriptorium.db`).
 
 ```bash
 uv run python -m scriptorium.feedback --catalog nist submit --text "..." --label IA   # returns a receipt with an ID
@@ -110,13 +110,35 @@ uv run python -m scriptorium.feedback --catalog nist reset                      
 ```
 
 How it works:
-- **Append-only log.** Status (`pending`, `approved`, `applied`, `withdrawn`, `rejected`, `rolled_back`) is derived by replaying events, so every change has a history. The log is private to your user account (`0600`). A corrupt or tampered log is refused rather than partly used.
+- **Append-only log.** Status (`pending`, `approved`, `applied`, `withdrawn`, `rejected`, `rolled_back`) is derived by replaying events, so every change has a history. The database is private to your user account (`0600`). A corrupt event is refused rather than partly used, and the hash chain detects edits made outside this code.
 - **Pending and approved entries never change a model.** `apply` refits on the training split plus applied corrections, each with a training weight (default 5, a starting guess). It compares held-out macro-F1 before and after and applies nothing if the drop exceeds the tolerance (default 0.02). `--force` overrides a failed gate only with a reason, and the override is recorded.
 - **The test split never leaks into training.** An approved correction whose text matches a held-out record is rejected.
 - **Rollback is exact.** Rolling back restores the previous model version, and every response reports `model_version`.
 - **Exact matches are surfaced.** If a query matches an applied correction's text, the response includes `applied_correction` next to the model's own prediction.
 
 **What the gate does not catch.** It blocks broad poisoning that hurts held-out accuracy (tested). A targeted attack, such as many corrections that tie a trigger word to a wrong label, leaves held-out records alone and passes the gate. A test documents this. The control for that is human review, which is why approval is required. `apply` also reports warnings for corrections that contradict a confident prediction and for bulk relabelling of one label as another.
+
+## Local API, tokens and the audit database
+
+Feedback, tokens and the audit trail live in one SQLite file, `~/.scriptorium/scriptorium.db` (mode 0600, not encrypted: use full-disk encryption). Every change is a row in an insert-only, SHA-256 hash-chained `events` table.
+
+```bash
+uv run python -m scriptorium.db verify          # recompute the chain; checks anchors too
+uv run python -m scriptorium.db anchor          # record the head hash in ~/.scriptorium/anchors.jsonl
+uv run python -m scriptorium.db backup --to ~/scriptorium-backup.db
+uv run python -m scriptorium.db import-legacy   # copy older JSONL feedback logs into the database
+uv run python -m scriptorium.auth create --role admin --name phil    # prints the token once
+uv run python -m scriptorium.auth create --role user --name alice
+uv run python -m scriptorium.auth list
+uv run python -m scriptorium.auth revoke tok_1a2b3c4d
+uv sync --extra web && uv run python -m scriptorium.api              # http://127.0.0.1:8765
+```
+
+- The chain makes edits, gaps and reordering detectable. It is **tamper-evident, not tamper-proof**; keep copies of the anchors file somewhere you can't quietly change (a git commit, an email).
+- Tokens are created and revoked only here. The API has no endpoint that mints them. Only SHA-256 hashes are stored.
+- The API serves loopback only and refuses other hosts. `user` tokens can classify, map, submit corrections and manage their own pending ones. `admin` tokens can also approve, reject, preview and apply, roll back, reset and view metrics and integrity.
+- Use it with `curl -H "Authorization: Bearer <token>" http://localhost:8765/api/me`. Endpoints are listed in `src/scriptorium/api.py`.
+- Threat model, per-risk controls with the test that covers each, and known limits: [docs/security.md](docs/security.md).
 
 ## Development
 

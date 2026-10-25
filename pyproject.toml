@@ -14,9 +14,14 @@ dependencies = [
 mcp = [
     "mcp>=2.3.0",
 ]
+web = [
+    "fastapi>=0.162.0",
+]
 
 [dependency-groups]
 dev = [
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
     "mcp>=2.3.0",
     "pytest>=8",
 ]

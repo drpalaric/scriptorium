@@ -172,3 +172,23 @@ def test_malformed_anchor_file_is_reported(database, tmp_path):
     anchors.write_text("garbage\n")
     v = database.verify(anchors)
     assert v["ok"] is False and any("malformed" in p for p in v["problems"])
+
+
+def test_separate_processes_can_write_concurrently_and_the_chain_stays_valid(tmp_path):
+    """The CLI, MCP server and API are separate processes sharing one database file."""
+    import subprocess
+    import sys
+
+    db_path = tmp_path / "shared" / "scriptorium.db"
+    code = (
+        "import sys\n"
+        "from scriptorium.db import Database\n"
+        "d = Database(sys.argv[1])\n"
+        "for i in range(10):\n"
+        "    d.audit('ping', 'proc' + sys.argv[2], {'i': i})\n"
+    )
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(db_path), str(n)], stderr=subprocess.PIPE, text=True) for n in range(4)]
+    errs = [p.communicate()[1] for p in procs]
+    assert all(p.returncode == 0 for p in procs), errs
+    v = Database(db_path).verify()
+    assert v["ok"] is True and v["events"] == 40, v

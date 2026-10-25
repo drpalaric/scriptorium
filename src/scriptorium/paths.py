@@ -18,6 +18,3 @@ def scf_dir() -> Path:
 def db_path() -> Path:
     return scriptorium_home() / "scriptorium.db"
 
-
-def anchors_path() -> Path:
-    return scriptorium_home() / "anchors.jsonl"

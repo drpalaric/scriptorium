@@ -69,6 +69,14 @@ class FeedbackError(ValueError):
     """Invalid feedback operation. The message is safe to show to the caller."""
 
 
+class NotFoundError(FeedbackError):
+    """No such entry (also used when the caller may not see it)."""
+
+
+class ConflictError(FeedbackError):
+    """The entry is in a state that does not allow the operation."""
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -170,7 +178,7 @@ def _state_error(fid: str, status: str, event: str) -> FeedbackError:
         msg = f"{fid} is {VERB.get(status, status)}; only {allowed} entries can be {VERB[event]}"
     if status == "applied" and event != "rolled_back":
         msg += " (use rollback to undo it)"
-    return FeedbackError(msg)
+    return ConflictError(msg)
 
 
 def _receipt(entry: dict[str, Any]) -> dict[str, Any]:
@@ -223,7 +231,7 @@ def transition(
     with store.locked(catalog):
         entry = store.entries(catalog).get(fid)
         if entry is None or (only_submitter is not None and entry["submitter"] != only_submitter):
-            raise FeedbackError(f"no feedback entry {fid} in {catalog}")
+            raise NotFoundError(f"no feedback entry {fid} in {catalog}")
         if entry["status"] not in ALLOWED_FROM[event]:
             raise _state_error(fid, entry["status"], event)
         store._append(catalog, {"event": event, "id": fid, "ts": _now(), "actor": actor, "reason": _reason(reason)})
@@ -270,6 +278,7 @@ def apply(
     tolerance: float = GATE_TOLERANCE,
     force: bool = False,
     reason: Any = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Train on applied + approved corrections, compare held-out scores, and apply if the gate passes.
 
@@ -290,7 +299,7 @@ def apply(
             return {"catalog": src.name, "applied": [], "message": "nothing approved to apply"}
         test_texts = {normalize_text(r["text"]) for r in svc._load(src.name)[1]}
         leaked = [e for e in approved if normalize_text(e["text"]) in test_texts]
-        for e in leaked:
+        for e in leaked if not dry_run else []:
             store._append(src.name, {"event": "rejected", "id": e["id"], "ts": _now(), "actor": "system", "reason": "text matches a held-out test record"})
         candidates = [e for e in approved if e not in leaked]
         if not candidates:
@@ -313,6 +322,12 @@ def apply(
             "weight": weight,
             "warnings": warnings,
         }
+        if dry_run:
+            would = svc.fit(src.name, current + new).predict([e["text"] for e in candidates])
+            return {
+                **report, "dry_run": True, "applied": [], "would_apply": [e["id"] for e in candidates],
+                "would_be_correct": {e["id"]: str(p) == e["label"] for e, p in zip(candidates, would)},
+            }
         if not passed and not force:
             return {**report, "applied": [], "message": "held-out score dropped more than the tolerance; nothing applied"}
         preds = pipe.predict([e["text"] for e in candidates])
@@ -346,7 +361,7 @@ def rollback(store: FeedbackStore, catalog: str, fids: list[str], actor: str = "
             if not isinstance(fid, str) or not _ID_RE.match(fid):
                 raise FeedbackError(BAD_ID)
             if fid not in entries:
-                raise FeedbackError(f"no feedback entry {fid} in {catalog}")
+                raise NotFoundError(f"no feedback entry {fid} in {catalog}")
             if entries[fid]["status"] != "applied":
                 raise _state_error(fid, entries[fid]["status"], "rolled_back")
         for fid in fids:
