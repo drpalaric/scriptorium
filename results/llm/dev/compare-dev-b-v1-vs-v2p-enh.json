@@ -1,0 +1,35 @@
+{
+ "task": "mapping",
+ "split": "dev-b",
+ "only_enhancements": true,
+ "a": {
+  "accuracy": 0.856140350877193,
+  "macro_f1": 0.8616475448921492
+ },
+ "b": {
+  "accuracy": 0.9543859649122807,
+  "macro_f1": 0.941586488969139
+ },
+ "model": "claude-sonnet-5-5",
+ "note": "b minus a over items both runs answered; 95% intervals resample base controls",
+ "n_paired": 285,
+ "b_minus_a": {
+  "accuracy_diff": 0.09824561403508769,
+  "macro_f1_diff": 0.07993894407698976
+ },
+ "b_minus_a_ci95": {
+  "accuracy_diff": [
+   0.032385398981324254,
+   0.16041204217536065
+  ],
+  "macro_f1_diff": [
+   0.015812146104339415,
+   0.14979640737886732
+  ]
+ },
+ "both_right": 239,
+ "only_a_right": 5,
+ "only_b_right": 33,
+ "neither_right": 8,
+ "h1_rule_met": true
+}

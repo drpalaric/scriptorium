@@ -87,6 +87,10 @@ On the same items, both were right on 89, only the LLM on 72, only sklearn on 7,
 - **Family prediction is a coarse stand-in for control mapping** (see above).
 - **The cost projection was too high** (about $0.63 projected for this run, $0.069 actual) because the system prompt was served from the prompt cache.
 
+### Prompt experiment (development split only)
+
+A pre-registered test of whether more context helps ([protocol](docs/experiments/prompt-v2.md), [results](docs/experiments/prompt-v2-dev-results.md)). On a training-derived dev split, **retrieved labelled examples (the primary condition) made no detectable difference** (macro-F1 +0.000, 95% CI -0.034 to +0.033), so by the registered rule nothing was run on the test split and the v1 prompt stays the default. Adding the **parent control's text** raised accuracy on enhancements from 0.856 to 0.965, but showing the model *only the parent* scored 0.954: an enhancement shares its parent's family, so that gain is inherited structure, not better understanding. It is useful only where a hierarchy exists (for example SCF sub-controls).
+
 ## Optional: Secure Controls Framework (SCF)
 
 Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, to classify requirements into SCF domains and to map between SCF and NIST. This is an optional input, not part of the core pipeline.
