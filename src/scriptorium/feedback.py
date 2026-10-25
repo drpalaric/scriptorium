@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import getpass
 import json
 import os
 import re
@@ -58,6 +59,8 @@ ALLOWED_FROM = {
     "rolled_back": {"applied"},
 }
 _ID_RE = re.compile(r"^fb_[0-9a-f]{12}$")
+BAD_ID = "invalid feedback id: expected fb_ followed by 12 lowercase hex characters (for example fb_5eed285fa122)"
+VERB = {"withdrawn": "withdrawn", "approved": "approved", "rejected": "rejected", "applied": "applied", "rolled_back": "rolled back"}
 _CATALOG_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
@@ -156,6 +159,17 @@ def _reason(reason: Any) -> str | None:
     return reason.strip() or None
 
 
+def _state_error(fid: str, status: str, event: str) -> FeedbackError:
+    if status == STATUS_AFTER[event]:
+        msg = f"{fid} is already {VERB[event]}; nothing to do"
+    else:
+        allowed = " or ".join(sorted(ALLOWED_FROM[event]))
+        msg = f"{fid} is {VERB.get(status, status)}; only {allowed} entries can be {VERB[event]}"
+    if status == "applied" and event != "rolled_back":
+        msg += " (use rollback to undo it)"
+    return FeedbackError(msg)
+
+
 def _receipt(entry: dict[str, Any]) -> dict[str, Any]:
     return {k: entry[k] for k in ("id", "status", "catalog", "text", "label", "predicted", "model_version", "submitter", "ts")}
 
@@ -192,18 +206,23 @@ def submit(svc: "Service", store: FeedbackStore, catalog: Any, text: Any, label:
         return {**_receipt(store.entries(src.name)[event["id"]]), "duplicate": False}
 
 
-def transition(store: FeedbackStore, catalog: str, fid: Any, event: str, actor: str, reason: Any = None) -> dict[str, Any]:
-    """Withdraw, approve or reject one entry. Apply and rollback have their own functions."""
+def transition(
+    store: FeedbackStore, catalog: str, fid: Any, event: str, actor: str, reason: Any = None, only_submitter: str | None = None
+) -> dict[str, Any]:
+    """Withdraw, approve or reject one entry. Apply and rollback have their own functions.
+
+    `only_submitter` restricts the change to entries that submitter created (used so an
+    MCP client can withdraw only its own submissions)."""
     if event not in ("withdrawn", "approved", "rejected"):
         raise FeedbackError("unsupported transition")
     if not isinstance(fid, str) or not _ID_RE.match(fid):
-        raise FeedbackError("invalid feedback id")
+        raise FeedbackError(BAD_ID)
     with store.locked(catalog):
         entry = store.entries(catalog).get(fid)
-        if entry is None:
+        if entry is None or (only_submitter is not None and entry["submitter"] != only_submitter):
             raise FeedbackError(f"no feedback entry {fid} in {catalog}")
         if entry["status"] not in ALLOWED_FROM[event]:
-            raise FeedbackError(f"cannot mark {fid} {event}: it is {entry['status']}")
+            raise _state_error(fid, entry["status"], event)
         store._append(catalog, {"event": event, "id": fid, "ts": _now(), "actor": actor, "reason": _reason(reason)})
         return _receipt(store.entries(catalog)[fid])
 
@@ -321,10 +340,12 @@ def rollback(store: FeedbackStore, catalog: str, fids: list[str], actor: str = "
     with store.locked(catalog):
         entries = store.entries(catalog)
         for fid in fids:
-            if not _ID_RE.match(fid) or fid not in entries:
+            if not isinstance(fid, str) or not _ID_RE.match(fid):
+                raise FeedbackError(BAD_ID)
+            if fid not in entries:
                 raise FeedbackError(f"no feedback entry {fid} in {catalog}")
             if entries[fid]["status"] != "applied":
-                raise FeedbackError(f"cannot roll back {fid}: it is {entries[fid]['status']}")
+                raise _state_error(fid, entries[fid]["status"], "rolled_back")
         for fid in fids:
             store._append(catalog, {"event": "rolled_back", "id": fid, "ts": _now(), "actor": actor, "reason": reason})
     return {"catalog": catalog, "rolled_back": fids}
@@ -336,6 +357,28 @@ def reset(store: FeedbackStore, catalog: str, actor: str = "cli", reason: Any = 
     if not ids:
         return {"catalog": catalog, "rolled_back": []}
     return rollback(store, catalog, ids, actor, reason)
+
+
+MAX_LIST = 100
+LIST_TEXT_CHARS = 300
+
+
+def list_entries(store: FeedbackStore, catalog: str, status: Any = None, limit: Any = 50, submitter: str | None = None) -> list[dict[str, Any]]:
+    """Newest first. Text is shortened; use `show` (CLI) for the full entry."""
+    if status is not None and status not in set(STATUS_AFTER.values()):
+        raise FeedbackError(f"status must be one of {sorted(set(STATUS_AFTER.values()))}")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIST:
+        raise FeedbackError(f"limit must be an integer from 1 to {MAX_LIST}")
+    rows = [
+        e for e in store.entries(catalog).values()
+        if (status is None or e["status"] == status) and (submitter is None or e["submitter"] == submitter)
+    ]
+    rows.sort(key=lambda e: e["history"][-1]["ts"], reverse=True)
+    return [
+        {"id": e["id"], "status": e["status"], "label": e["label"], "predicted": e["predicted"], "submitter": e["submitter"],
+         "submitted": e["ts"], "updated": e["history"][-1]["ts"], "text": e["text"][:LIST_TEXT_CHARS]}
+        for e in rows[:limit]
+    ]
 
 
 # ---- CLI ------------------------------------------------------------------------------------
@@ -372,26 +415,26 @@ def main(argv: list[str] | None = None) -> int:
 
     svc = Service.default()
     store = svc.feedback
+    actor = f"cli:{getpass.getuser()}"
     try:
         if args.cmd == "submit":
-            out: Any = submit(svc, store, args.catalog, args.text, args.label)
+            out: Any = submit(svc, store, args.catalog, args.text, args.label, submitter=actor)
         elif args.cmd == "list":
-            out = [
-                {k: e[k] for k in ("id", "status", "label", "predicted", "ts")} | {"text": e["text"][:80]}
-                for e in store.entries(args.catalog).values()
-                if args.status is None or e["status"] == args.status
-            ]
+            out = list_entries(store, args.catalog, args.status, MAX_LIST)
         elif args.cmd == "show":
-            out = store.entries(args.catalog).get(args.id) or {"error": f"no entry {args.id}"}
+            entry = store.entries(args.catalog).get(args.id)
+            if entry is None:
+                raise FeedbackError(BAD_ID if not _ID_RE.match(args.id) else f"no feedback entry {args.id} in {args.catalog}")
+            out = {"id": entry["id"], "status": entry["status"]} | entry
         elif args.cmd in ("approve", "reject", "withdraw"):
             event = {"approve": "approved", "reject": "rejected", "withdraw": "withdrawn"}[args.cmd]
-            out = transition(store, args.catalog, args.id, event, "cli", args.reason)
+            out = transition(store, args.catalog, args.id, event, actor, args.reason)
         elif args.cmd == "apply":
-            out = apply(svc, store, args.catalog, "cli", args.weight, args.tolerance, args.force, args.reason)
+            out = apply(svc, store, args.catalog, actor, args.weight, args.tolerance, args.force, args.reason)
         elif args.cmd == "rollback":
-            out = rollback(store, args.catalog, args.ids, "cli", args.reason)
+            out = rollback(store, args.catalog, args.ids, actor, args.reason)
         else:
-            out = reset(store, args.catalog, "cli", args.reason)
+            out = reset(store, args.catalog, actor, args.reason)
     except (FeedbackError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

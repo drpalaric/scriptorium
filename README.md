@@ -68,7 +68,7 @@ uv run python -m scriptorium.crosswalk                                         #
 
 The data this project publishes and reports on comes from NIST SP 800-53 Rev 5 (OSCAL), a U.S. government work.
 
-## MCP server (read-only)
+## MCP server
 
 `scriptorium.mcp_server` exposes the models to an MCP client over stdio. It serves NIST, plus SCF if you built it locally.
 
@@ -83,11 +83,15 @@ claude mcp add scriptorium -- uv run --directory /path/to/scriptorium python -m 
 | `classify_requirement(text, catalog, top_k)` | Top families/domains with scores and a `low_confidence` flag |
 | `map_requirement(text, to_catalog, top_k)` | Most similar controls in another catalog (TF-IDF cosine) |
 | `map_control(control_id, from_catalog, to_catalog, top_k)` | Same, from an existing control, plus the published mapping if your SCF file has one |
+| `submit_feedback(text, label, catalog)` | Queue a correction as **pending**. Returns a receipt with an ID. Does not change the model. |
+| `list_feedback(catalog, status, limit)` | This server's submissions and their status, newest first |
+| `withdraw_feedback(feedback_id, catalog, reason)` | Withdraw one of this server's own pending corrections |
 
 Security properties, each covered by a test:
-- **Read-only.** No tool writes, trains, or changes a model. Queries never alter the model.
+- **No client can change a model.** Read tools never write. The feedback tools can only queue pending corrections and withdraw the server's own pending ones. Approving, applying, rolling back and resetting are CLI-only admin operations (see below). Submissions are rate-limited (20 per minute).
 - **No file paths or URLs as input.** Catalogs come from a fixed allowlist, control IDs and text are validated and length-capped, and error messages don't echo input.
-- **Text is data.** Input is never executed or interpolated into prompts, and no LLM is called.
+- **Text is data.** Input is never executed or interpolated into prompts, and no LLM is called. Submitted text is stored verbatim for a human to review.
+- **Errors are useful but safe.** Validation errors tell the client what was wrong without echoing its input. Unexpected failures reach the client only as a generic error; details stay in the server log.
 - **Calibration, not confidence theatre.** `low_confidence` uses a threshold derived from out-of-fold predictions on the training split only.
 - If SCF is built locally, tool results can contain SCF control text and are sent to whichever client you connect. Connect only clients you trust.
 - Every response says its results are suggestions that need human review.

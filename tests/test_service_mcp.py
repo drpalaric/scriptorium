@@ -157,15 +157,20 @@ def _list_tools(server):
     return asyncio.run(go())
 
 
-def test_mcp_exposes_only_the_four_read_only_tools_without_path_like_parameters(svc):
+def test_mcp_tool_surface_annotations_and_no_path_like_parameters(svc):
     from scriptorium.mcp_server import build_server
 
-    tools = _list_tools(build_server(svc))
-    assert sorted(t.name for t in tools) == ["classify_requirement", "list_catalogs", "map_control", "map_requirement"]
-    for t in tools:
-        assert t.annotations.read_only_hint is True and t.annotations.destructive_hint is False
+    tools = {t.name: t for t in _list_tools(build_server(svc))}
+    read = {"classify_requirement", "list_catalogs", "map_control", "map_requirement", "list_feedback"}
+    assert set(tools) == read | {"submit_feedback", "withdraw_feedback"}
+    assert not [n for n in tools if any(w in n for w in ("approve", "apply", "rollback", "reset", "reject", "train", "delete"))]
+    for name, t in tools.items():
+        assert t.annotations.read_only_hint is (name in read), name
+        assert t.annotations.open_world_hint is False
         params = set(t.input_schema.get("properties", {}))
-        assert not [p for p in params if any(w in p.lower() for w in ("path", "file", "url", "dir", "command"))], t.name
+        assert not [p for p in params if any(w in p.lower() for w in ("path", "file", "url", "dir", "command"))], name
+    assert tools["withdraw_feedback"].annotations.destructive_hint is True
+    assert tools["submit_feedback"].annotations.destructive_hint is False
 
 
 def test_mcp_tool_call_and_safe_errors(svc):
@@ -176,7 +181,8 @@ def test_mcp_tool_call_and_safe_errors(svc):
     assert not ok.is_error
     bad = _client_call(server, "classify_requirement", {"text": "x", "catalog": "../../etc/passwd"})
     assert bad.is_error
-    assert "etc/passwd" not in json.dumps([c.model_dump() for c in bad.content])
+    text = json.dumps([c.model_dump() for c in bad.content])
+    assert "unknown catalog" in text and "etc/passwd" not in text
 
 
 def test_mcp_stdio_subprocess_smoke(tmp_path):
@@ -195,3 +201,15 @@ def test_mcp_stdio_subprocess_smoke(tmp_path):
     assert "classify_requirement" in tools and not res.is_error
     assert "nist" in json.dumps([c.model_dump() for c in res.content])
     assert "scf" not in json.dumps([c.model_dump() for c in res.content]).replace("scriptorium", "")
+
+
+def test_mcp_unexpected_crash_does_not_leak_internals(svc, monkeypatch):
+    from scriptorium.mcp_server import build_server
+
+    def boom(*a, **k):
+        raise RuntimeError("secret detail /Users/someone/.scriptorium/scf/train.jsonl")
+
+    monkeypatch.setattr(svc, "classify", boom)
+    res = _client_call(build_server(svc), "classify_requirement", {"text": "account access"})
+    text = json.dumps([c.model_dump() for c in res.content])
+    assert res.is_error and "secret" not in text and ".scriptorium" not in text

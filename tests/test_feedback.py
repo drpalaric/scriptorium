@@ -84,7 +84,7 @@ def test_illegal_transitions_are_refused(env, event, setup):
     svc, store, _ = env
     r = fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
     fb.transition(store, "nist", r["id"], setup, "admin")
-    with pytest.raises(FeedbackError, match="cannot mark"):
+    with pytest.raises(FeedbackError, match="nothing to do|only .* entries can be"):
         fb.transition(store, "nist", r["id"], event, "admin")
 
 
@@ -124,7 +124,7 @@ def test_rollback_restores_original_model_exactly(env):
     assert svc._model("nist").version == v0
     assert [svc.classify(t)["predictions"] for t in probe] == p0
     assert store.entries("nist")[r["id"]]["status"] == "rolled_back"
-    with pytest.raises(FeedbackError, match="cannot roll back"):
+    with pytest.raises(FeedbackError, match="only applied entries can be rolled back|already rolled back"):
         fb.rollback(store, "nist", [r["id"]])
 
 
