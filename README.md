@@ -98,6 +98,21 @@ On the same items, both were right on 89, only the LLM on 72, only sklearn on 7,
 
 A pre-registered test of whether more context helps ([protocol](docs/experiments/prompt-v2.md), [results](docs/experiments/prompt-v2-dev-results.md)). On a training-derived dev split, **retrieved labelled examples (the primary condition) made no detectable difference** (macro-F1 +0.000, 95% CI -0.034 to +0.033), so by the registered rule nothing was run on the test split and the v1 prompt stays the default. Adding the **parent control's text** raised accuracy on enhancements from 0.856 to 0.965, but showing the model *only the parent* scored 0.954: an enhancement shares its parent's family, so that gain is inherited structure, not better understanding. It is useful only where a hierarchy exists (for example SCF sub-controls).
 
+## Published mappings between frameworks (local files you supply)
+
+Mapping files published by CIS, NIST OLIR, CSA and the Center for Threat-Informed Defense can be loaded into one local store and looked up by control. Nothing from these files is in this repository: you download them, register them, and everything derived stays under `~/.scriptorium/`.
+
+```bash
+uv sync --extra crosswalks
+uv run python -m scriptorium.crosswalks build --cis-controls F.xlsx --cis-nist F.xlsx --nist-iso F.xlsx --ccm-csf F.xlsx --cis-attack F.json   # any subset
+uv run python -m scriptorium.sources        # what is registered, with hashes and license status
+```
+
+- **Source register** (`scriptorium.sources`): each file is registered with its SHA-256 and its license status ("stated in the file" or "unverified"), and a loader refuses a file that changed after registration. The CIS workbooks state CC BY-NC-ND 4.0 (non-commercial, no distribution of modified material); the others state nothing in the file. Check each publisher's terms yourself.
+- **Adapters fail loudly** on unexpected headers instead of guessing.
+- **Lookups** return each pair labelled **published** (an official pair, with the publisher's relationship where one is stated) or **indirect** (NIST control to ATT&CK technique composed through CIS safeguards; it is not an official mapping). The publisher's absence of a pair does not mean no relationship: CIS says it deliberately under-maps.
+- **Guardrails:** a test fails if any workbook or derived store content is tracked in git. Published results from these files are aggregates only.
+
 ## Optional: Secure Controls Framework (SCF)
 
 Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, to classify requirements into SCF domains and to map between SCF and NIST. This is an optional input, not part of the core pipeline.
@@ -133,7 +148,8 @@ claude mcp add scriptorium -- uv run --directory /path/to/scriptorium python -m 
 | `list_catalogs` | Available catalogs, labels, model version, confidence calibration |
 | `classify_requirement(text, catalog, top_k)` | Top families/domains with scores and a `low_confidence` flag |
 | `map_requirement(text, to_catalog, top_k)` | Most similar controls in another catalog (TF-IDF cosine) |
-| `map_control(control_id, from_catalog, to_catalog, top_k)` | Same, from an existing control, plus the published mapping if your SCF file has one |
+| `map_control(control_id, from_catalog, to_catalog, top_k)` | Same, from an existing control, plus the published SCF mapping and, for NIST controls, official CIS / ISO 27001 pairs and indirect ATT&CK techniques if you built them |
+| `get_published_mappings(framework, element_id)` | Official pairs for one control or element (NIST, CIS, ISO 27001, CSF, CCM, ATT&CK), each labelled published or indirect |
 | `submit_feedback(text, label, catalog)` | Queue a correction as **pending**. Returns a receipt with an ID. Does not change the model. |
 | `list_feedback(catalog, status, limit)` | This server's submissions and their status, newest first |
 | `withdraw_feedback(feedback_id, catalog, reason)` | Withdraw one of this server's own pending corrections |

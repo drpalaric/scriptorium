@@ -119,7 +119,10 @@ def test_guardrail_no_scf_data_is_tracked_in_git():
         pytest.skip("not a git checkout")
     assert not [f for f in files if f.startswith("data/scf/")]
     assert not [f for f in files if "oscal-catalog-20" in f or f.startswith("scf-full")]
-    marker = "User-supplied SCF input"
+    assert not [f for f in files if f.endswith((".xlsx", ".xls"))], "framework workbooks must never be tracked"
+    markers = ["User-supplied SCF input", "Built from user-supplied files; local-only", "local-only: never commit this file or content derived from it"]
     for f in files:
         if f.endswith((".json", ".jsonl")) and (root / f).exists():
-            assert marker not in (root / f).read_text(encoding="utf-8", errors="ignore"), f
+            text = (root / f).read_text(encoding="utf-8", errors="ignore")
+            for marker in markers:
+                assert marker not in text, (f, marker)

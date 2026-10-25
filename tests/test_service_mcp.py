@@ -161,7 +161,7 @@ def test_mcp_tool_surface_annotations_and_no_path_like_parameters(svc):
     from scriptorium.mcp_server import build_server
 
     tools = {t.name: t for t in _list_tools(build_server(svc))}
-    read = {"classify_requirement", "list_catalogs", "map_control", "map_requirement", "list_feedback"}
+    read = {"classify_requirement", "list_catalogs", "map_control", "map_requirement", "list_feedback", "get_published_mappings"}
     assert set(tools) == read | {"submit_feedback", "withdraw_feedback"}
     assert not [n for n in tools if any(w in n for w in ("approve", "apply", "rollback", "reset", "reject", "train", "delete"))]
     for name, t in tools.items():

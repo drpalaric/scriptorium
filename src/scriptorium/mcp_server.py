@@ -75,6 +75,12 @@ def build_server(service: Service | None = None, limiter: RateLimiter | None = N
         """Map an existing control (for example AC-2 or GOV-03) to similar controls in another catalog, with the published mapping if one exists."""
         return guarded(svc.map_control, control_id, from_catalog, to_catalog, top_k)
 
+    @server.tool(annotations=READ_ONLY)
+    def get_published_mappings(framework: str, element_id: str) -> dict[str, Any]:
+        """Official mappings for one control or element, each labelled published or indirect with its source.
+        framework: nist-800-53r5, cis-8.1, iso-27001-2022, csf-2.0, ccm-4.0 or attack-19.1. Examples: AC-2, 5.1 (CIS safeguard), GV.OC-01."""
+        return guarded(svc.published_mappings, framework, element_id)
+
     @server.tool(annotations=APPEND_ONLY)
     def submit_feedback(text: str, label: str, catalog: str = "nist") -> dict[str, Any]:
         """Queue a correction: `text` should be classified as `label` in `catalog`. Returns a receipt with an id.

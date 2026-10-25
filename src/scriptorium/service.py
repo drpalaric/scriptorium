@@ -27,12 +27,18 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
 
 from scriptorium import baseline, crosswalk, ingest, paths
+from scriptorium.crosswalks import CrosswalkError, MappingStore
 from scriptorium.db import Database
 from scriptorium.feedback import FeedbackStore, normalize_text
 
 MAX_TEXT_CHARS = 4000
 MAX_TOP_K = 10
 SNIPPET_CHARS = 300
+MAX_PUBLISHED = 60
+MAPPING_DISCLAIMER = (
+    "Published = an official pair from the named source file. Indirect = composed from two published links and is not an official "
+    "mapping. Relationships are as stated by the publisher; several sources state none. Absence of a pair does not mean no relationship."
+)
 DISCLAIMER = (
     "Suggestions from a TF-IDF/linear-model baseline, not authoritative mappings. "
     "Similarity is not proof of coverage. Review before relying on any result."
@@ -84,12 +90,13 @@ def _margin_and_correct(pipeline: Pipeline, rows: list[dict[str, Any]]) -> tuple
 
 
 class Service:
-    def __init__(self, sources: dict[str, CatalogSource], feedback: FeedbackStore | None = None):
+    def __init__(self, sources: dict[str, CatalogSource], feedback: FeedbackStore | None = None, mappings: MappingStore | None = None):
         for name in sources:
             if not _CATALOG_NAME_RE.match(name):
                 raise ValueError(f"invalid catalog name: {name!r}")
         self._sources = dict(sources)
         self.feedback = feedback
+        self.mappings = mappings
         self._rows: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
         self._models: dict[str, _Model] = {}
         self._calibration: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -107,7 +114,7 @@ class Service:
             sources["scf"] = CatalogSource(
                 "scf", scf_dir, scf_dir / "results" / "baseline_metrics.json", scf_dir / "nist_r5_2_mappings.json"
             )
-        return cls(sources, FeedbackStore(Database(paths.db_path())))
+        return cls(sources, FeedbackStore(Database(paths.db_path())), MappingStore.load())
 
     # ---- validation -------------------------------------------------------------------
 
@@ -261,7 +268,7 @@ class Service:
                     "confidence_calibration": m.oof,
                 }
             )
-        return {"catalogs": out, "disclaimer": DISCLAIMER}
+        return {"catalogs": out, "published_mapping_frameworks": self.mappings.frameworks_present() if self.mappings else [], "disclaimer": DISCLAIMER}
 
     def classify(self, text: Any, catalog: Any = "nist", top_k: Any = 3) -> dict[str, Any]:
         text, k = self._text(text), self._top_k(top_k)
@@ -330,7 +337,35 @@ class Service:
             "to_catalog": dst.name,
             "published_mapping": sorted(published.get(rec["id"], [])) if published is not None else None,
             "published_mapping_source": "NIST SP 800-53 Rev 5.2 mappings in the user's SCF catalog" if published is not None else None,
+            "published_cross_framework": self._cross_framework(rec["id"]) if src.name == "nist" else None,
             "similarity_matches": self._nearest(vec.transform([rec["text"]]), dst.name, k, exclude_id=rec["id"] if src is dst else None),
             "method": "TF-IDF cosine similarity",
             "disclaimer": DISCLAIMER,
+        }
+
+    # ---- published mappings between frameworks (official pairs from user-supplied files) -------------
+
+    def _cross_framework(self, nist_id: str) -> dict[str, Any] | None:
+        """Official pairs for a NIST control, plus the labelled-indirect ATT&CK techniques. None if no mappings were built."""
+        if self.mappings is None:
+            return None
+        pairs = self.mappings.published("nist-800-53r5", nist_id)
+        return {"published": pairs[:MAX_PUBLISHED], "published_total": len(pairs),
+                "indirect_attack": self.mappings.indirect_attack("nist-800-53r5", nist_id), "disclaimer": MAPPING_DISCLAIMER}
+
+    def published_mappings(self, framework: Any, element_id: Any) -> dict[str, Any]:
+        """Official mappings for one element of one framework, in both directions, each labelled published or indirect."""
+        if self.mappings is None:
+            raise ServiceError("no published mappings are available; build them with `python -m scriptorium.crosswalks build ...` (see the README)")
+        try:
+            eid = MappingStore.normalize(framework, element_id)
+            pairs = self.mappings.published(framework, eid)
+            indirect = self.mappings.indirect_attack(framework, eid)
+        except CrosswalkError as e:
+            raise ServiceError(str(e)) from None
+        return {
+            "framework": framework, "element": {"id": eid, "title": (self.mappings.elements.get((framework, eid)) or {}).get("title") or None},
+            "published": pairs[:MAX_PUBLISHED], "published_total": len(pairs),
+            "indirect_attack": indirect if framework == "nist-800-53r5" else None,
+            "sources": sorted({p["source"] for p in pairs}), "disclaimer": MAPPING_DISCLAIMER,
         }

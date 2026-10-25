@@ -51,3 +51,59 @@ def make_store(tmp_path):
     from scriptorium.feedback import FeedbackStore
 
     return FeedbackStore(Database(tmp_path / "home" / "scriptorium.db"))
+
+
+def xlsx(path, sheets):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets.items():
+        ws = wb.create_sheet(name)
+        for r in rows:
+            ws.append(r)
+    wb.save(path)
+    return path
+
+
+def crosswalk_files(tmp_path):
+    cis = xlsx(tmp_path / "cis.xlsx", {
+        "Introduction": [["intro"]],
+        "Controls v8.1.2": [
+            ["CIS Control", "CIS Safeguard", "Asset Class", "Security Function", "Title", "Description", "IG1"],
+            ["1\xa0", "", "", "", "Asset Control", "Manage assets", ""],
+            ["1", "1.1", "Devices", "Identify", "Inventory", "Keep an inventory of devices", "x"],
+            ["1", "1.2", "Devices", "Respond", "Unauthorized", "Handle unauthorized devices", "x"],
+        ]})
+    mapping = xlsx(tmp_path / "map.xlsx", {
+        "All CIS Controls & Safeguards": [
+            ["", "CIS Control", "CIS Safeguard", "Asset Type", "Security Function", "Title", "Description", "IG1", "IG2", "IG3", "Relationship", "Control Identifier",
+             "Control or Control Enhancement Name", "Control Text"],
+            ["", "1", "", "", "", "Asset Control", "", "", "", "", "", "", "", ""],
+            ["", "1", "1.1", "Devices", "Identify", "Inventory", "d", "x", "x", "x", "Subset", "CM-8", "System Component Inventory", "txt"],
+            ["", "1", "1.1", "Devices", "Identify", "Inventory", "d", "x", "x", "x", "Superset", "CM-8(1)", "Updates", "txt"],
+            ["", "1", "1.2", "Devices", "Respond", "Unauthorized", "d", "x", "x", "x", "Equivalent", "CM-8(3)", "Detection", "txt"],
+        ]})
+    iso = xlsx(tmp_path / "iso.xlsx", {
+        "Relationships-AC": [
+            ["Focal Document\nElement", "Focal Document Element Description", "Security Control Baseline", "Reference Document\nElement", "Reference Document Element Description (Optional)", "Comments", "Strength of Relationship (Optional)"],
+            ["CM-08", "a. inventory", "Low", "A.5.9", "", "", ""],
+            ["CM-08(01)", "update", "Low", "A.5.9", "", "", ""],
+            ["CM-08", "a. inventory", "Low", "7.5.1", "", "", ""],
+        ],
+        "Definitions": [["Term"]]})
+    ccm = xlsx(tmp_path / "ccm.xlsx", {
+        "General Information": [["Informative Reference Submission Form"]],
+        "Relationships": [
+            ["Focal Document Element", "Focal Document Element Description", "Reference Document Element", "Reference Document Element Description (Optional)", "Comments (Optional)", "Strength of Relationship (Optional)"],
+            ["GV.OC-01", "The mission is understood", "BCR-01", "", "", ""],
+            ["GV.OC-01", "The mission is understood", "BCR-07", "", "", ""],
+        ]})
+    attack = tmp_path / "attack.json"
+    attack.write_text(json.dumps({"metadata": {}, "mapping_objects": [
+        {"capability_id": "CIS-1.1", "capability_description": "Inventory", "mapping_type": "mitigates", "attack_object_id": "T1200", "attack_object_name": "Hardware Additions", "comments": "why"},
+        {"capability_id": "CIS-1.2", "capability_description": "Unauthorized", "mapping_type": "mitigates", "attack_object_id": "T1200", "attack_object_name": "Hardware Additions", "comments": "why2"},
+        {"capability_id": "CIS-1.2", "capability_description": "Unauthorized", "mapping_type": "mitigates", "attack_object_id": "T1078", "attack_object_name": "Valid Accounts", "comments": ""},
+        {"capability_id": "CIS-3.1", "capability_description": "Policy", "mapping_type": "non_mappable", "attack_object_id": None, "attack_object_name": None, "comments": ""},
+    ]}))
+    return {"cis-controls": cis, "cis-nist-mapping": mapping, "nist-iso27001": iso, "ccm-csf": ccm, "cis-attack": attack}
