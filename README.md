@@ -21,6 +21,7 @@ Policy-as-code and control mapping for AI governance. Public data only; no emplo
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
 | Prompt-injection test | 8 attack variants, ablation, sklearn contrast | Done; results below |
+| Duplicate detection (scikit-learn vs LLM) | char n-gram TF-IDF, LLM judge | Done; results below |
 | Policy-drafting evaluation | Vale scores | Not started |
 | Web UI (user and admin pages) | TypeScript | Not started |
 
@@ -119,6 +120,10 @@ uv run python -m scriptorium.sources        # what is registered, with hashes an
 ### Prompt-injection test (pre-registered)
 
 Eight label-flipping attacks, 200 items each ([protocol](docs/experiments/injection.md), [results](docs/experiments/injection-results.md)). With the production prompt the model produced the attacker's chosen family **once in 1,600 attacked requests** (95% CI 0.000 to 0.002 for the pooled rate). With the "untrusted data" sentence removed the rate was 0.121, and one attack that offers a fallback fitting the output schema reached 0.745. Attacks that did not hijack the label still cost a few points of accuracy. One model, fixed non-adaptive templates: a measurement, not a safety guarantee.
+
+### Duplicate detection: scikit-learn against an LLM (pre-registered)
+
+`python -m scriptorium.overlap duplicates --file my_policy.txt --threshold 0.14` finds statements that say the same thing, offline and for free ([protocol](docs/experiments/overlap.md), [results](docs/experiments/overlap-results.md)). On real, human-labelled pairs, character n-gram TF-IDF ranked pairs as well as an LLM (AUC 0.930 against 0.946, indistinguishable), in under a tenth of a second against 6 minutes and $1.47. The LLM was clearly better on its own paraphrases (partly circular) and more precise as a reader of partial overlaps. Use scikit-learn to screen, and a person or an LLM to read what it surfaces. It does not judge whether a policy satisfies a control.
 
 ### CIS comparison (pre-registered, aggregates only)
 
