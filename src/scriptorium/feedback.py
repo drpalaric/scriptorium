@@ -6,9 +6,9 @@ Lifecycle of one correction:
                    |                     |
                    +--withdraw/reject    +--reject
 
-Storage is an append-only JSONL event log per catalog under `~/.scriptorium/feedback/`.
-Status is derived by replaying events; nothing is edited or deleted in place, so every
-change has a history. Only `applied` corrections are used for training, and only after
+Events are stored in the hash-chained, insert-only `events` table of the local SQLite
+database (see `scriptorium.db`). Status is derived by replaying events; nothing is edited
+or deleted in place, so every change has a history. Only `applied` corrections are used for training, and only after
 `apply` has checked that the frozen held-out score did not drop by more than a tolerance.
 
 Pending entries never change a model. Approve, apply, rollback and reset are CLI (admin)
@@ -23,17 +23,18 @@ operations; a client such as the MCP server will only be able to submit, list an
 from __future__ import annotations
 
 import argparse
-import fcntl
 import getpass
 import json
-import os
 import re
 import secrets
 import sys
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from scriptorium.db import Database, append_event
 
 if TYPE_CHECKING:
     from scriptorium.service import Service
@@ -77,51 +78,53 @@ def normalize_text(text: str) -> str:
 
 
 class FeedbackStore:
-    def __init__(self, root: Path):
-        self.root = root
+    """Feedback events kept in the hash-chained `events` table of the local database."""
 
-    def _path(self, catalog: str) -> Path:
-        if not _CATALOG_RE.match(catalog):
+    def __init__(self, db: Database):
+        self.db = db
+        self._tx = threading.local()
+
+    def _check_catalog(self, catalog: str) -> None:
+        if not isinstance(catalog, str) or not _CATALOG_RE.match(catalog):
             raise FeedbackError("invalid catalog name")
-        return self.root / f"{catalog}.jsonl"
 
     @contextmanager
     def locked(self, catalog: str):
-        """Exclusive lock over a catalog's log, held across read-check-append sequences."""
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.root, 0o700)
-        lock_path = self.root / f".{catalog}.lock"
-        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+        """Exclusive write transaction held across a read-check-append sequence."""
+        self._check_catalog(catalog)
+        with self.db.transaction() as conn:
+            self._tx.conn = conn
+            try:
+                yield
+            finally:
+                self._tx.conn = None
 
     def _append(self, catalog: str, event: dict[str, Any]) -> None:
         """Append one event. Caller must hold `locked(catalog)`."""
-        fd = os.open(self._path(catalog), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        try:
-            os.write(fd, (json.dumps(event, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        conn = getattr(self._tx, "conn", None)
+        if conn is None:
+            raise FeedbackError("internal error: append outside a locked transaction")
+        append_event(
+            conn, "feedback", event["event"], event, catalog=catalog, entity_id=event["id"],
+            actor=event.get("actor") or event.get("submitter"), ts=event["ts"],
+        )
 
     def events(self, catalog: str) -> list[dict[str, Any]]:
-        path = self._path(catalog)
-        if not path.exists():
-            return []
+        self._check_catalog(catalog)
+        conn = getattr(self._tx, "conn", None)
+        if conn is not None:
+            rows = conn.execute("SELECT seq, payload FROM events WHERE kind='feedback' AND catalog=? ORDER BY seq", (catalog,)).fetchall()
+        else:
+            with self.db.reader() as c:
+                rows = [] if c is None else c.execute("SELECT seq, payload FROM events WHERE kind='feedback' AND catalog=? ORDER BY seq", (catalog,)).fetchall()
         out = []
-        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if not line.strip():
-                continue
+        for r in rows:
             try:
-                ev = json.loads(line)
+                ev = json.loads(r["payload"])
             except json.JSONDecodeError:
-                raise FeedbackError(f"feedback log {path.name} is corrupt at line {n}; not using it") from None
-            if ev.get("event") not in STATUS_AFTER or not _ID_RE.match(str(ev.get("id", ""))):
-                raise FeedbackError(f"feedback log {path.name} has an invalid event at line {n}; not using it")
+                raise FeedbackError(f"feedback event {r['seq']} is corrupt; not using the log") from None
+            if not isinstance(ev, dict) or ev.get("event") not in STATUS_AFTER or not _ID_RE.match(str(ev.get("id", ""))):
+                raise FeedbackError(f"feedback event {r['seq']} is invalid; not using the log")
             out.append(ev)
         return out
 

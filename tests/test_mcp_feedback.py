@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from conftest import rows_for, write
+from conftest import make_store, rows_for, write
 from scriptorium import feedback as fb
 from scriptorium.feedback import FeedbackStore
 from scriptorium.service import CatalogSource, Service
@@ -17,7 +17,7 @@ from scriptorium.mcp_server import RateLimiter, build_server  # noqa: E402
 @pytest.fixture()
 def env(tmp_path):
     write(tmp_path / "nist", rows_for({"AC": "AC", "AU": "AU", "SC": "SC"}))
-    store = FeedbackStore(tmp_path / "home" / "feedback")
+    store = make_store(tmp_path)
     svc = Service({"nist": CatalogSource("nist", tmp_path / "nist")}, store)
     return svc, store
 

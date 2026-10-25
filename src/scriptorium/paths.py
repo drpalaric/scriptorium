@@ -13,3 +13,11 @@ def scriptorium_home() -> Path:
 
 def scf_dir() -> Path:
     return scriptorium_home() / "scf"
+
+
+def db_path() -> Path:
+    return scriptorium_home() / "scriptorium.db"
+
+
+def anchors_path() -> Path:
+    return scriptorium_home() / "anchors.jsonl"

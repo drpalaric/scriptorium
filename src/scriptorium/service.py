@@ -27,6 +27,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
 
 from scriptorium import baseline, crosswalk, ingest, paths
+from scriptorium.db import Database
 from scriptorium.feedback import FeedbackStore, normalize_text
 
 MAX_TEXT_CHARS = 4000
@@ -106,7 +107,7 @@ class Service:
             sources["scf"] = CatalogSource(
                 "scf", scf_dir, scf_dir / "results" / "baseline_metrics.json", scf_dir / "nist_r5_2_mappings.json"
             )
-        return cls(sources, FeedbackStore(paths.scriptorium_home() / "feedback"))
+        return cls(sources, FeedbackStore(Database(paths.db_path())))
 
     # ---- validation -------------------------------------------------------------------
 

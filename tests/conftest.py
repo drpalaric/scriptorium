@@ -35,3 +35,11 @@ def write(dirpath, rows):
     train = [r for r in rows if int(r["base_id"].split("-")[1]) <= 9]
     for name, rs in (("train.jsonl", train), ("test.jsonl", test)):
         (dirpath / name).write_text("".join(json.dumps(r) + "\n" for r in rs))
+
+
+def make_store(tmp_path):
+    """A FeedbackStore backed by a fresh database under tmp_path."""
+    from scriptorium.db import Database
+    from scriptorium.feedback import FeedbackStore
+
+    return FeedbackStore(Database(tmp_path / "home" / "scriptorium.db"))

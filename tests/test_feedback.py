@@ -5,7 +5,7 @@ import stat
 
 import pytest
 
-from conftest import rows_for, write
+from conftest import make_store, rows_for, write
 from scriptorium import feedback as fb
 from scriptorium.feedback import FeedbackError, FeedbackStore
 from scriptorium.service import CatalogSource, Service, ServiceError
@@ -14,7 +14,7 @@ from scriptorium.service import CatalogSource, Service, ServiceError
 @pytest.fixture()
 def env(tmp_path):
     write(tmp_path / "nist", rows_for({"AC": "AC", "AU": "AU", "SC": "SC"}))
-    store = FeedbackStore(tmp_path / "home" / "feedback")
+    store = make_store(tmp_path)
     svc = Service({"nist": CatalogSource("nist", tmp_path / "nist")}, store)
     return svc, store, tmp_path
 
@@ -209,27 +209,116 @@ def test_test_split_file_is_never_modified(env):
     assert (tmp / "nist" / "test.jsonl").read_bytes() == before
 
 
-def test_log_is_append_only_and_private(env):
+def test_log_is_append_only_chained_and_private(env):
+    svc, store, tmp = env
+    r = fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
+    head1 = store.db.head()
+    fb.transition(store, "nist", r["id"], "approved", "admin")
+    assert store.db.head()["seq"] == head1["seq"] + 1
+    assert store.db.verify()["ok"] is True
+    assert stat.S_IMODE(store.db.path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.db.path.parent.stat().st_mode) == 0o700
+    import sqlite3
+
+    raw = sqlite3.connect(store.db.path)
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        raw.execute("UPDATE events SET actor='x'")
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        raw.execute("DELETE FROM events")
+    raw.close()
+
+
+def _tamper(store, sql, args=()):
+    """Edit the database behind our code's back (dropping the triggers first, as an attacker would)."""
+    import sqlite3
+
+    raw = sqlite3.connect(store.db.path)
+    for t in ("events_no_update", "events_no_delete"):
+        raw.execute(f"DROP TRIGGER IF EXISTS {t}")
+    raw.execute(sql, args)
+    raw.commit()
+    raw.close()
+
+
+def test_verify_detects_out_of_band_edits_to_history(env):
     svc, store, _ = env
     r = fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
-    path = store.root / "nist.jsonl"
-    first = path.read_text()
     fb.transition(store, "nist", r["id"], "approved", "admin")
-    assert path.read_text().startswith(first) and len(path.read_text().splitlines()) == 2
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(store.root.stat().st_mode) == 0o700
+    assert store.db.verify()["ok"] is True
+    _tamper(store, "UPDATE events SET actor='someone-else' WHERE seq=1")
+    v = store.db.verify()
+    assert v["ok"] is False and any("seq 1" in p and "hash" in p for p in v["problems"])
 
 
-@pytest.mark.parametrize(
-    "line",
-    ["not json", json.dumps({"event": "approved", "id": "fb_000000000000"}), json.dumps({"event": "hack", "id": "fb_000000000000"}), json.dumps({"event": "submitted", "id": "../x"})],
-)
-def test_corrupt_or_tampered_log_is_refused(env, line):
+def test_anchors_detect_removed_rows_that_the_chain_alone_cannot(env, tmp_path):
     svc, store, _ = env
-    store.root.mkdir(parents=True, exist_ok=True)
-    (store.root / "nist.jsonl").write_text(line + "\n")
+    anchors = tmp_path / "anchors.jsonl"
+    a = fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
+    fb.transition(store, "nist", a["id"], "approved", "admin")
+    store.db.anchor(anchors)  # anchored at seq 2
+    fb.transition(store, "nist", a["id"], "rejected", "admin")  # seq 3
+    assert store.db.verify(anchors)["ok"] is True
+    _tamper(store, "DELETE FROM events WHERE seq=3")
+    assert store.db.verify()["ok"] is True  # a shorter chain is still a valid chain
+    _tamper(store, "DELETE FROM events WHERE seq=2")
+    v = store.db.verify(anchors)
+    assert v["ok"] is False and any("anchor" in p and "missing" in p for p in v["problems"])
+
+
+def test_anchor_refuses_a_broken_chain(env, tmp_path):
+    svc, store, _ = env
+    fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
+    _tamper(store, "UPDATE events SET actor='x' WHERE seq=1")
+    with pytest.raises(Exception, match="refusing to anchor"):
+        store.db.anchor(tmp_path / "anchors.jsonl")
+
+
+def test_verify_detects_a_gap_in_the_middle(env):
+    svc, store, _ = env
+    for i in range(3):
+        fb.submit(svc, store, "nist", f"badge door visitor {i}", "SC")
+    _tamper(store, "DELETE FROM events WHERE seq=2")
+    v = store.db.verify()
+    assert v["ok"] is False and any("gap" in p or "prev_hash" in p for p in v["problems"])
+
+
+def test_tampered_event_content_is_refused_by_replay(env):
+    svc, store, _ = env
+    fb.submit(svc, store, "nist", "badge door camera visitor", "SC")
+    _tamper(store, "UPDATE events SET payload='not json' WHERE seq=1")
     with pytest.raises(FeedbackError):
         store.entries("nist")
+    assert store.db.verify()["ok"] is False
+
+
+def test_concurrent_writers_keep_the_chain_valid(env):
+    import threading
+
+    svc, store, _ = env
+    errors = []
+
+    def worker(n):
+        try:
+            for i in range(5):
+                fb.submit(svc, store, "nist", f"badge door visitor {n} {i}", "SC", submitter=f"t{n}")
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    v = store.db.verify()
+    assert v["ok"] is True and v["events"] == 20
+    assert len(store.entries("nist")) == 20
+
+
+def test_reading_does_not_create_the_database(tmp_path):
+    from scriptorium.db import Database
+
+    store = fb.FeedbackStore(Database(tmp_path / "nothing" / "scriptorium.db"))
+    assert store.entries("nist") == {} and store.applied("nist") == []
+    assert not (tmp_path / "nothing").exists()
 
 
 def test_reason_is_length_limited(env):
