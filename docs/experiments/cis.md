@@ -39,3 +39,11 @@ The CIS-to-NIST mapping is public and the model may have seen it, so E2 and E3 r
 ## Budget
 
 About $0.1 to $0.3 in total. Any single run is capped at $5 by the harness.
+
+## Amendment 1 (committed before any CIS experiment was run)
+
+Found while checking item counts, before any scoring: both CIS workbooks store safeguard IDs as numbers, so `3.10` was stored as `3.1` and collided with the real `3.1`. The first read merged five safeguards (3.10, 4.10, 8.10, 13.10, 16.10) into their `.1` neighbours, and it attributed their mapping pairs to the wrong safeguards. The loader now rebuilds each ID from its position within its Control and verifies it against the stored number, failing loudly if the order is unexpected; the rebuilt IDs agree with the text IDs in the ATT&CK file for all 152 safeguards it mentions (three titles differ only in wording).
+
+Corrected facts, replacing figures quoted above: **E1 has 153 items (as registered); E2 has 143 items, of which 86 are single-family, not 140 and 84**; the 372 official pairs, the 18 clusters and everything else are unchanged. The registered rules, metrics, systems and settings are unchanged. No result had been computed at the time of this amendment.
+
+One preprocessing detail not stated above: cross-references inside descriptions ("Safeguard 4.1", "Control 12") are replaced with `[safeguard]` / `[control]`, as NIST control IDs are, so that a number cannot leak the label. It affects one description.

@@ -123,3 +123,49 @@ def test_lookup_validates_input(store, fw, eid):
 
 def test_store_loads_none_when_nothing_was_built(tmp_path):
     assert MappingStore.load(tmp_path / "empty") is None
+
+
+# ---- regression: safeguard IDs stored as numbers (3.10 is stored as 3.1) ----------------------------------------
+
+
+def _control_rows(control, n):
+    return [[float(f"{control}.{k}"), f"Title {control}.{k}", f"Desc {control}.{k}"] for k in range(1, n + 1)]
+
+
+def test_safeguard_ids_are_rebuilt_from_position_so_x_dot_10_does_not_collide_with_x_dot_1():
+    rows = [("3", v[0], v[1]) for v in _control_rows(3, 12)]
+    ids = crosswalks._safeguard_ids(rows, 0, 1, 2)
+    assert [sid for _, _, sid in ids] == [f"3.{k}" for k in range(1, 13)]
+    assert rows[0][1] == rows[9][1] == 3.1  # the stored numbers really are ambiguous
+    assert len({sid for _, _, sid in ids}) == 12
+
+
+def test_ids_are_rebuilt_per_control_with_repeated_rows_mixed_text_and_numbers_and_header_rows():
+    rows = [("1\xa0", "", "Header"),
+            ("1", 1.1, "A"), ("1", 1.1, "A"), ("1", "1.2", "B"),  # two rows for A, text-typed B
+            ("2", 2.1, "C"), ("2", 2.2, "D"), ("2", 2.2, "D")]
+    assert [(c, sid) for _, c, sid in crosswalks._safeguard_ids(rows, 0, 1, 2)] == [("1", "1.1"), ("1", "1.1"), ("1", "1.2"), ("2", "2.1"), ("2", "2.2"), ("2", "2.2")]
+    assert crosswalks._ctrl(3.0) == "3" and crosswalks._ctrl("3\xa0") == "3" and crosswalks._ctrl("12") == "12"
+
+
+@pytest.mark.parametrize("rows", [
+    [("1", 1.1, "A"), ("1", 1.3, "B")],               # skipped number
+    [("1", 1.2, "A"), ("1", 1.1, "B")],               # out of order
+    [("1", "1.5", "A")],                              # text ID that disagrees with its position
+])
+def test_numbering_that_disagrees_with_position_raises_instead_of_guessing(rows):
+    with pytest.raises(CrosswalkError, match="does not match its position"):
+        crosswalks._safeguard_ids(rows, 0, 1, 2)
+
+
+def test_the_cis_adapters_keep_all_twelve_safeguards_and_their_mappings_when_ids_are_numbers(tmp_path):
+    rows = [["CIS Control", "CIS Safeguard", "Asset Class", "Security Function", "Title", "Description"], ["3\xa0", "", "", "", "Data", "Control text"]]
+    rows += [["3", float(f"3.{k}"), "Data", "Protect", f"Title {k}", f"Desc {k}"] for k in range(1, 13)]
+    els, _ = crosswalks.read_cis_controls(xlsx(tmp_path / "c.xlsx", {"Controls v8.1.2": rows}))
+    sgs = {e["id"]: e for e in els if e.get("meta", {}).get("control")}
+    assert len(sgs) == 12 and sgs["3.10"]["title"] == "Title 10" and sgs["3.1"]["title"] == "Title 1"
+    m = [["", "CIS Control", "CIS Safeguard", "Asset Type", "Security Function", "Title", "Description", "IG1", "IG2", "IG3", "Relationship", "Control Identifier", "Control or Control Enhancement Name", "Control Text"]]
+    m += [["", "3", float(f"3.{k}"), "Data", "Protect", f"Title {k}", "d", "x", "x", "x", "Subset", f"AC-{k}", f"N{k}", "t"] for k in range(1, 13)]
+    _, maps = crosswalks.read_cis_mapping(xlsx(tmp_path / "m.xlsx", {"All CIS Controls & Safeguards": m}))
+    by = {x["from_id"]: x["to_id"] for x in maps}
+    assert len(by) == 12 and by["3.10"] == "AC-10" and by["3.1"] == "AC-1"

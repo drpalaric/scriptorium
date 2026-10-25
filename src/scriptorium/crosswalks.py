@@ -50,6 +50,41 @@ def _s(v: Any) -> str:
     return re.sub(r"\s+", " ", str(v).replace("\xa0", " ")).strip() if v is not None else ""
 
 
+def _ctrl(v: Any) -> str:
+    """A CIS Control number as '1'..'18' (workbooks store it as text, as a number, or with a non-breaking space)."""
+    t = _s(v)
+    try:
+        f = float(t)
+        return str(int(f)) if f.is_integer() else t
+    except ValueError:
+        return t
+
+
+def _safeguard_ids(rows: list[tuple], ctrl_col: int, sg_col: int, title_col: int) -> list[tuple[int, str, str]]:
+    """(row index, control, safeguard id) for every safeguard row, with IDs rebuilt from position.
+
+    The workbooks store safeguard IDs as numbers, so '3.10' is stored as 3.1 and collides with '3.1'. A safeguard is
+    the k-th distinct (title) run within its Control, so its ID is '<control>.<k>'. The rebuilt ID must agree with the
+    stored value (as a number, or exactly if stored as text); if the sheet is not in the expected order this raises
+    instead of guessing.
+    """
+    out, prev_key, k = [], None, 0
+    for i, r in enumerate(rows):
+        ctrl, stored = _ctrl(r[ctrl_col]), r[sg_col]
+        if ctrl == "" or _s(stored) == "":
+            continue
+        key = (ctrl, _s(r[title_col]))
+        if key != prev_key:
+            k = k + 1 if (prev_key is not None and prev_key[0] == ctrl) else 1
+            prev_key = key
+        sid = f"{ctrl}.{k}"
+        ok = (_s(stored) == sid) if isinstance(stored, str) else abs(float(stored) - float(sid)) < 1e-9
+        if not ok:
+            raise CrosswalkError(f"safeguard numbering does not match its position (row {i + 2}: stored {stored!r}, expected {sid}); the sheet is not in the expected order")
+        out.append((i, ctrl, sid))
+    return out
+
+
 def _need(header: list[str], expected: list[str], where: str) -> dict[str, int]:
     idx = {h: i for i, h in enumerate(header) if h}
     missing = [h for h in expected if h not in idx]
@@ -88,15 +123,15 @@ def read_cis_controls(path: Path) -> tuple[list[dict], list[dict]]:
     rows = list(sheet.iter_rows(values_only=True))
     idx = _need([_s(c) for c in rows[0]], ["CIS Control", "CIS Safeguard", "Asset Class", "Security Function", "Title", "Description"], "CIS controls sheet")
     els = []
-    for r in rows[1:]:
-        ctrl, sg = _s(r[idx["CIS Control"]]), _s(r[idx["CIS Safeguard"]])
-        if not ctrl:
-            continue
-        title, desc = _s(r[idx["Title"]]), _s(r[idx["Description"]])
-        if sg:
-            els.append(_element("cis-8.1", sg, title, desc, control=ctrl, asset_class=_s(r[idx["Asset Class"]]), security_function=_s(r[idx["Security Function"]])))
-        else:
-            els.append(_element("cis-8.1", ctrl, title, desc, level="control"))
+    body = rows[1:]
+    ids = {i: (c, sid) for i, c, sid in _safeguard_ids(body, idx["CIS Control"], idx["CIS Safeguard"], idx["Title"])}
+    for i, r in enumerate(body):
+        if i in ids:
+            ctrl, sid = ids[i]
+            els.append(_element("cis-8.1", sid, _s(r[idx["Title"]]), _s(r[idx["Description"]]), control=ctrl,
+                                asset_class=_s(r[idx["Asset Class"]]), security_function=_s(r[idx["Security Function"]])))
+        elif _ctrl(r[idx["CIS Control"]]) and not _s(r[idx["CIS Safeguard"]]):
+            els.append(_element("cis-8.1", _ctrl(r[idx["CIS Control"]]), _s(r[idx["Title"]]), _s(r[idx["Description"]]), level="control"))
     if not any(e["meta"].get("control") for e in els if "meta" in e):
         raise CrosswalkError("CIS controls sheet had no safeguard rows")
     return els, []
@@ -108,10 +143,13 @@ def read_cis_mapping(path: Path) -> tuple[list[dict], list[dict]]:
     if sheet is None:
         raise CrosswalkError(f"{path.name}: no sheet named 'All CIS Controls...'; found {[ws.title for ws in wb.worksheets]}")
     rows = list(sheet.iter_rows(values_only=True))
-    idx = _need([_s(c) for c in rows[0]], ["CIS Safeguard", "Title", "Relationship", "Control Identifier", "Control or Control Enhancement Name"], "CIS mapping sheet")
+    idx = _need([_s(c) for c in rows[0]], ["CIS Control", "CIS Safeguard", "Title", "Relationship", "Control Identifier", "Control or Control Enhancement Name"], "CIS mapping sheet")
     els, maps, seen = [], [], set()
-    for r in rows[1:]:
-        sg, nid = _s(r[idx["CIS Safeguard"]]), _s(r[idx["Control Identifier"]])
+    body = rows[1:]
+    sg_of = {i: sid for i, _c, sid in _safeguard_ids(body, idx["CIS Control"], idx["CIS Safeguard"], idx["Title"])}
+    for i, r in enumerate(body):
+        nid = _s(r[idx["Control Identifier"]])
+        sg = sg_of.get(i)
         if not sg or not nid:
             continue
         rel = _s(r[idx["Relationship"]]).lower() or None

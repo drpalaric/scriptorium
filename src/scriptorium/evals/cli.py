@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from scriptorium import baseline, ingest, paths
-from scriptorium.evals import context, mapping, splits
+from scriptorium.evals import cis_cli, context, mapping, splits
 from scriptorium.evals.budget import Budget, estimate_tokens_offline, price_for
 from scriptorium.evals.llm import AnthropicClient, CachedClient, EFFORTS, LazyClient, LLMError, ResponseCache, THINKING_MODES, cache_key
 from scriptorium.evals.prompts import load_prompt
@@ -67,6 +67,7 @@ def _args(argv):
     r.add_argument("--workers", type=int, default=4)
     r.add_argument("--workspace-id", default=None, help="needed when the API key is not scoped to a workspace (or set ANTHROPIC_WORKSPACE_ID)")
     r.add_argument("--out", type=Path, default=None, help="report directory (default: ~/.scriptorium/evals/reports)")
+    cis_cli.add_parser(sub)
     c = sub.add_parser("compare", help="paired comparison of two cached runs (no API call)")
     _common(c)
     c.add_argument("--a", required=True, help="reference prompt version")
@@ -131,6 +132,8 @@ def _cmd_compare(a) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     a = _args(argv)
+    if a.cmd == "cis":
+        return cis_cli.run(a)
     try:
         if a.cmd == "compare":
             return _cmd_compare(a)
