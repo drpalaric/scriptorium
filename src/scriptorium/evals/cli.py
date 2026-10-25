@@ -54,6 +54,7 @@ def _args(argv):
     r.add_argument("--replay", action="store_true", help="answer only from the cache; make no API calls")
     r.add_argument("--refresh", action="store_true", help="ignore cached answers and call the API again")
     r.add_argument("--workers", type=int, default=4)
+    r.add_argument("--workspace-id", default=None, help="needed when the API key is not scoped to a workspace (or set ANTHROPIC_WORKSPACE_ID)")
     r.add_argument("--out", type=Path, default=None, help="report directory (default: ~/.scriptorium/evals/reports)")
     return ap.parse_args(argv)
 
@@ -106,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Not running: projected ${plan['projected_usd']:.2f} exceeds the cap ${a.budget_usd:.2f}. Raise --budget-usd or use --limit.", file=sys.stderr)
             return 3
         budget = Budget(a.budget_usd)
-        inner = LazyClient(lambda: AnthropicClient())  # credentials are needed only if a call is actually made
+        inner = LazyClient(lambda: AnthropicClient(workspace_id=a.workspace_id))  # credentials are needed only if a call is actually made
         client = CachedClient(inner, cache, a.task, prompt.version, prompt.sha256, budget=budget, refresh=a.refresh)
 
     try:
@@ -114,6 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     except LLMError as e:
         print(f"error: {e}", file=sys.stderr)
         return 4
+    except ValueError as e:  # for example a malformed workspace id
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     sk = mapping.sklearn_predictions(items)
     report = build_report(
         model=a.model, prompt=prompt, sample=reqs[0], outcomes=outcomes, labels=sorted(families), sk_pred=sk,

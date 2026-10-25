@@ -79,6 +79,7 @@ class LLMClient(Protocol):
     def complete(self, req: LLMRequest) -> LLMResponse: ...
 
 
+_WORKSPACE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _KEY_RE = re.compile(r"sk-[A-Za-z0-9_\-]{6,}")
 
 
@@ -104,19 +105,27 @@ def build_messages_kwargs(req: LLMRequest) -> dict[str, Any]:
 class AnthropicClient:
     """Live client. Credentials come from the environment or the SDK's own profile; nothing is stored here."""
 
-    def __init__(self, client: Any | None = None):
+    def __init__(self, client: Any | None = None, workspace_id: str | None = None):
         if client is None:
             import anthropic
 
             client = anthropic.Anthropic(max_retries=3, timeout=120.0)
         self._client = client
+        # A key that is not scoped to one workspace needs the workspace named on every request.
+        wid = workspace_id or os.environ.get("ANTHROPIC_WORKSPACE_ID") or None
+        if wid is not None and not _WORKSPACE_RE.match(wid):
+            raise ValueError("workspace id must be 1-64 characters: letters, digits, dash, underscore")
+        self.workspace_id = wid
 
     def complete(self, req: LLMRequest) -> LLMResponse:
         import anthropic
 
         no_credentials = FatalLLMError("no credentials found: set ANTHROPIC_API_KEY in your environment (or log in with the Anthropic CLI) and retry")
         try:
-            r = self._client.messages.create(**build_messages_kwargs(req))
+            kwargs = build_messages_kwargs(req)
+            if self.workspace_id:
+                kwargs["workspace_id"] = self.workspace_id  # sent as the anthropic-workspace-id header
+            r = self._client.messages.create(**kwargs)
         except anthropic.CredentialsError:
             raise no_credentials from None
         except TypeError as e:  # the SDK raises this before any network call when nothing is configured

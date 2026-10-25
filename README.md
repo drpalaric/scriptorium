@@ -54,6 +54,7 @@ How to read this:
 ```bash
 uv sync --extra llm
 export ANTHROPIC_API_KEY=...      # in your own shell; it is never written to the repo, logs, cache or reports
+export ANTHROPIC_WORKSPACE_ID=...   # only if your key is not scoped to a workspace (the API then returns a 400 asking for it)
 uv run python -m scriptorium.evals plan mapping --model claude-sonnet-5-5               # no API call; shows a rough projection
 uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --limit 20 --yes   # a small trial first
 uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --yes          # full run, capped at $5 by default

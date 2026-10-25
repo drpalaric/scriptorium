@@ -371,7 +371,7 @@ def cli_env(tmp_path, monkeypatch):
     real_items = baseline.load_jsonl(ingest.PROCESSED_DIR / "test.jsonl")
     truth = {mapping.user_message(r["text"]): r["family"] for r in real_items}
 
-    def factory():
+    def factory(**kw):
         made["n"] += 1
         made["fake"] = Fake(lambda rq: resp(json.dumps({"family": truth[rq.user]})))
         return made["fake"]
@@ -420,7 +420,7 @@ def test_replay_on_an_empty_cache_reports_incomplete_without_calling(cli_env, ca
 def test_fatal_api_error_exits_cleanly_with_no_traceback(cli_env, monkeypatch, capsys):
     made, base, tmp = cli_env
 
-    def bad_factory():
+    def bad_factory(**kw):
         return Fake(lambda rq: (_ for _ in ()).throw(FatalLLMError("authentication failed: set ANTHROPIC_API_KEY in your environment")))
 
     monkeypatch.setattr(cli, "AnthropicClient", bad_factory)
@@ -487,3 +487,47 @@ def test_missing_credentials_is_a_clean_fatal_error_before_any_network_call(monk
     with pytest.raises(FatalLLMError, match="no credentials found") as e:
         llm.AnthropicClient().complete(req())
     assert "Traceback" not in str(e.value)
+
+
+def test_workspace_id_is_sent_only_when_given_from_flag_or_environment(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID", raising=False)
+    stub = StubSDK(sdk_result())
+    llm.AnthropicClient(stub).complete(req())
+    assert "workspace_id" not in stub.seen
+    llm.AnthropicClient(stub, workspace_id="wrkspc_abc123").complete(req())
+    assert stub.seen["workspace_id"] == "wrkspc_abc123"
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_from_env")
+    llm.AnthropicClient(stub).complete(req())
+    assert stub.seen["workspace_id"] == "wrkspc_from_env"
+    for bad in ("has space", "x" * 70, "a/b", "bad;id"):
+        with pytest.raises(ValueError):
+            llm.AnthropicClient(stub, workspace_id=bad)
+
+
+def test_workspace_id_travels_as_the_real_sdk_header():
+    anthropic = pytest.importorskip("anthropic")
+    seen = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            seen["header"] = self.headers.get("anthropic-workspace-id")
+            body = json.dumps({"id": "m", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5", "stop_reason": "end_turn", "stop_sequence": None,
+                               "content": [{"type": "text", "text": "{}"}], "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        sdk = anthropic.Anthropic(api_key="k", base_url=f"http://127.0.0.1:{srv.server_port}", max_retries=0)
+        llm.AnthropicClient(sdk, workspace_id="wrkspc_hdr").complete(req())
+    finally:
+        srv.shutdown()
+    assert seen["header"] == "wrkspc_hdr"
