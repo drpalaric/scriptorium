@@ -6,7 +6,9 @@ only the scikit-learn models and data already built by `ingest`, `scf` and `base
 Design constraints (see README, "Security"):
   * No tool argument is ever used as a file path. Catalogs are chosen from a fixed
     allowlist built at start-up; control IDs and free text are validated and length-capped.
-  * Nothing here writes to disk or changes a model. Queries never train anything.
+  * Queries never write to disk or train anything. The only thing that changes a model is
+    an admin applying approved corrections (see `scriptorium.feedback`); the model is then
+    refit from the catalog's training split plus those corrections.
   * Every response carries a disclaimer: results are suggestions that need human review.
 """
 
@@ -21,9 +23,11 @@ from typing import Any
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics import accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
 
 from scriptorium import baseline, crosswalk, ingest, paths
+from scriptorium.feedback import FeedbackStore, normalize_text
 
 MAX_TEXT_CHARS = 4000
 MAX_TOP_K = 10
@@ -58,6 +62,8 @@ class _Model:
     low_conf_margin: float
     oof: dict[str, Any]
     titles: dict[str, str]
+    corrections: dict[str, dict[str, Any]]  # normalized text -> {"id", "label"} for applied corrections
+    key: tuple = ()
 
 
 def _sha(*parts: bytes) -> str:
@@ -77,13 +83,15 @@ def _margin_and_correct(pipeline: Pipeline, rows: list[dict[str, Any]]) -> tuple
 
 
 class Service:
-    def __init__(self, sources: dict[str, CatalogSource]):
+    def __init__(self, sources: dict[str, CatalogSource], feedback: FeedbackStore | None = None):
         for name in sources:
             if not _CATALOG_NAME_RE.match(name):
                 raise ValueError(f"invalid catalog name: {name!r}")
         self._sources = dict(sources)
+        self.feedback = feedback
         self._rows: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
         self._models: dict[str, _Model] = {}
+        self._calibration: dict[str, tuple[float, dict[str, Any]]] = {}
         self._index: tuple[TfidfVectorizer, dict[str, Any]] | None = None
         self._truth: dict[str, dict[str, set[str]]] | None = None
 
@@ -98,7 +106,7 @@ class Service:
             sources["scf"] = CatalogSource(
                 "scf", scf_dir, scf_dir / "results" / "baseline_metrics.json", scf_dir / "nist_r5_2_mappings.json"
             )
-        return cls(sources)
+        return cls(sources, FeedbackStore(paths.scriptorium_home() / "feedback"))
 
     # ---- validation -------------------------------------------------------------------
 
@@ -145,37 +153,74 @@ class Service:
             return json.loads(src.results_path.read_text(encoding="utf-8"))["selected_config"]
         return dict(DEFAULT_CONFIG)
 
+    def labels(self, name: str) -> set[str]:
+        return {r["family"] for r in self._load(name)[0]}
+
+    def fit(self, name: str, corrections: list[dict[str, Any]]) -> Pipeline:
+        """Fit the catalog's model on its training split plus weighted corrections."""
+        train, _ = self._load(name)
+        X = [r["text"] for r in train] + [c["text"] for c in corrections]
+        y = [r["family"] for r in train] + [c["label"] for c in corrections]
+        w = [1.0] * len(train) + [float(c["weight"]) for c in corrections]
+        return baseline.build_pipeline(self._config(self._sources[name])).fit(X, y, clf__sample_weight=w)
+
+    def heldout_scores(self, name: str, pipeline: Pipeline) -> dict[str, float]:
+        """Scores on the frozen test split. Used by the apply gate, never for training."""
+        _, test = self._load(name)
+        y = [r["family"] for r in test]
+        pred = pipeline.predict([r["text"] for r in test])
+        return {
+            "accuracy": round(float(accuracy_score(y, pred)), 4),
+            "macro_f1": round(float(f1_score(y, pred, average="macro", zero_division=0)), 4),
+        }
+
+    def _calibrate(self, name: str) -> tuple[float, dict[str, Any]]:
+        """Low-confidence threshold from out-of-fold predictions on the training split only:
+        the median score margin among wrong predictions. Corrections are not included."""
+        if name not in self._calibration:
+            train, _ = self._load(name)
+            cfg = self._config(self._sources[name])
+            margins, correct = [], []
+            for tr, va in baseline.grouped_folds(train):
+                fold = baseline.build_pipeline(cfg).fit([train[i]["text"] for i in tr], [train[i]["family"] for i in tr])
+                m, c = _margin_and_correct(fold, [train[i] for i in va])
+                margins.append(m)
+                correct.append(c)
+            margins, correct = np.concatenate(margins), np.concatenate(correct)
+            wrong = margins[~correct]
+            threshold = float(np.median(wrong)) if len(wrong) else 0.0
+            low = margins < threshold
+            self._calibration[name] = (
+                threshold,
+                {
+                    "threshold_margin": threshold,
+                    "oof_accuracy": float(correct.mean()),
+                    "oof_accuracy_if_confident": float(correct[~low].mean()) if (~low).any() else None,
+                    "oof_accuracy_if_low_confidence": float(correct[low].mean()) if low.any() else None,
+                },
+            )
+        return self._calibration[name]
+
     def _model(self, name: str) -> _Model:
-        if name in self._models:
-            return self._models[name]
+        """The active model: training split plus applied corrections. Refit when those change."""
+        corrections = sorted(self.feedback.applied(name), key=lambda e: e["id"]) if self.feedback else []
+        key = tuple((c["id"], c["weight"]) for c in corrections)
+        cached = self._models.get(name)
+        if cached is not None and cached.key == key:
+            return cached
         src = self._sources[name]
         train, _ = self._load(name)
         cfg = self._config(src)
-        X = [r["text"] for r in train]
-        y = [r["family"] for r in train]
-        pipe = baseline.build_pipeline(cfg).fit(X, y)
-
-        # Low-confidence threshold from out-of-fold predictions on the training split only:
-        # the median score margin among wrong predictions.
-        margins, correct = [], []
-        for tr, va in baseline.grouped_folds(train):
-            fold = baseline.build_pipeline(cfg).fit([X[i] for i in tr], [y[i] for i in tr])
-            m, c = _margin_and_correct(fold, [train[i] for i in va])
-            margins.append(m)
-            correct.append(c)
-        margins, correct = np.concatenate(margins), np.concatenate(correct)
-        wrong = margins[~correct]
-        threshold = float(np.median(wrong)) if len(wrong) else 0.0
-        low = margins < threshold
-        oof = {
-            "threshold_margin": threshold,
-            "oof_accuracy": float(correct.mean()),
-            "oof_accuracy_if_confident": float(correct[~low].mean()) if (~low).any() else None,
-            "oof_accuracy_if_low_confidence": float(correct[low].mean()) if low.any() else None,
-        }
-        version = _sha(json.dumps(cfg, sort_keys=True).encode(), *(json.dumps(r, sort_keys=True).encode() for r in train))[:12]
+        pipe = self.fit(name, corrections)
+        threshold, oof = self._calibrate(name)
+        version = _sha(
+            json.dumps(cfg, sort_keys=True).encode(),
+            *(json.dumps(r, sort_keys=True).encode() for r in train),
+            *(json.dumps([c["id"], c["text"], c["label"], c["weight"]]).encode() for c in corrections),
+        )[:12]
         titles = {r["family"]: r.get("family_title", r["family"]) for r in train}
-        self._models[name] = _Model(pipe, version, cfg, threshold, oof, titles)
+        lookup = {normalize_text(c["text"]): {"id": c["id"], "label": c["label"]} for c in corrections}
+        self._models[name] = _Model(pipe, version, cfg, threshold, oof, titles, lookup, key)
         return self._models[name]
 
     def _retrieval_index(self) -> tuple[TfidfVectorizer, dict[str, Any]]:
@@ -233,6 +278,8 @@ class Service:
             ],
             "margin": round(margin, 4),
             "low_confidence": margin < m.low_conf_margin,
+            # Exact-text match with an applied correction: shown alongside, never hidden.
+            "applied_correction": m.corrections.get(normalize_text(text)),
             "disclaimer": DISCLAIMER,
         }
 

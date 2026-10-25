@@ -1,0 +1,403 @@
+"""Corrections ("feedback") with an approval step, a held-out gate, and rollback.
+
+Lifecycle of one correction:
+
+    submitted -> pending --approve--> approved --apply--> applied --rollback--> rolled_back
+                   |                     |
+                   +--withdraw/reject    +--reject
+
+Storage is an append-only JSONL event log per catalog under `~/.scriptorium/feedback/`.
+Status is derived by replaying events; nothing is edited or deleted in place, so every
+change has a history. Only `applied` corrections are used for training, and only after
+`apply` has checked that the frozen held-out score did not drop by more than a tolerance.
+
+Pending entries never change a model. Approve, apply, rollback and reset are CLI (admin)
+operations; a client such as the MCP server will only be able to submit, list and withdraw.
+
+    python -m scriptorium.feedback list --catalog nist
+    python -m scriptorium.feedback approve fb_ab12cd34ef56 --catalog nist
+    python -m scriptorium.feedback apply --catalog nist
+    python -m scriptorium.feedback rollback fb_ab12cd34ef56 --catalog nist
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import re
+import secrets
+import sys
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from scriptorium.service import Service
+
+CORRECTION_WEIGHT = 5.0  # training weight of one correction relative to one catalog record
+GATE_TOLERANCE = 0.02  # max allowed drop in held-out macro-F1 when applying
+MAX_PENDING = 500  # per catalog
+MAX_REASON_CHARS = 500
+
+STATUS_AFTER = {
+    "submitted": "pending",
+    "withdrawn": "withdrawn",
+    "approved": "approved",
+    "rejected": "rejected",
+    "applied": "applied",
+    "rolled_back": "rolled_back",
+}
+ALLOWED_FROM = {
+    "withdrawn": {"pending"},
+    "approved": {"pending"},
+    "rejected": {"pending", "approved"},
+    "applied": {"approved"},
+    "rolled_back": {"applied"},
+}
+_ID_RE = re.compile(r"^fb_[0-9a-f]{12}$")
+_CATALOG_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+class FeedbackError(ValueError):
+    """Invalid feedback operation. The message is safe to show to the caller."""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+class FeedbackStore:
+    def __init__(self, root: Path):
+        self.root = root
+
+    def _path(self, catalog: str) -> Path:
+        if not _CATALOG_RE.match(catalog):
+            raise FeedbackError("invalid catalog name")
+        return self.root / f"{catalog}.jsonl"
+
+    @contextmanager
+    def locked(self, catalog: str):
+        """Exclusive lock over a catalog's log, held across read-check-append sequences."""
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.root, 0o700)
+        lock_path = self.root / f".{catalog}.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def _append(self, catalog: str, event: dict[str, Any]) -> None:
+        """Append one event. Caller must hold `locked(catalog)`."""
+        fd = os.open(self._path(catalog), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (json.dumps(event, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def events(self, catalog: str) -> list[dict[str, Any]]:
+        path = self._path(catalog)
+        if not path.exists():
+            return []
+        out = []
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                raise FeedbackError(f"feedback log {path.name} is corrupt at line {n}; not using it") from None
+            if ev.get("event") not in STATUS_AFTER or not _ID_RE.match(str(ev.get("id", ""))):
+                raise FeedbackError(f"feedback log {path.name} has an invalid event at line {n}; not using it")
+            out.append(ev)
+        return out
+
+    def entries(self, catalog: str) -> dict[str, dict[str, Any]]:
+        """Replay the log into {id: entry}. Each entry has its current status and full history."""
+        entries: dict[str, dict[str, Any]] = {}
+        for ev in self.events(catalog):
+            fid = ev["id"]
+            if ev["event"] == "submitted":
+                if fid in entries:
+                    raise FeedbackError(f"feedback log has a duplicate submission for {fid}")
+                entries[fid] = {k: ev[k] for k in ("id", "catalog", "text", "label", "predicted", "model_version", "submitter", "ts")}
+                entries[fid]["history"] = []
+            elif fid not in entries:
+                raise FeedbackError(f"feedback log has an event for unknown entry {fid}")
+            entry = entries[fid]
+            entry["status"] = STATUS_AFTER[ev["event"]]
+            entry["history"].append({k: v for k, v in ev.items() if k not in ("text", "label", "predicted", "catalog")})
+            if ev["event"] == "applied":
+                entry["weight"] = ev["weight"]
+        return entries
+
+    def applied(self, catalog: str) -> list[dict[str, Any]]:
+        return [e for e in self.entries(catalog).values() if e["status"] == "applied"]
+
+
+# ---- operations ---------------------------------------------------------------------------
+
+
+def _reason(reason: Any) -> str | None:
+    if reason is None:
+        return None
+    if not isinstance(reason, str) or len(reason) > MAX_REASON_CHARS or "\x00" in reason:
+        raise FeedbackError(f"reason must be a string of at most {MAX_REASON_CHARS} characters")
+    return reason.strip() or None
+
+
+def _receipt(entry: dict[str, Any]) -> dict[str, Any]:
+    return {k: entry[k] for k in ("id", "status", "catalog", "text", "label", "predicted", "model_version", "submitter", "ts")}
+
+
+def submit(svc: "Service", store: FeedbackStore, catalog: Any, text: Any, label: Any, submitter: str = "cli") -> dict[str, Any]:
+    """Record a pending correction and return a receipt echoing exactly what was stored."""
+    src = svc._catalog(catalog)
+    text = svc._text(text)
+    labels = svc.labels(src.name)
+    if not isinstance(label, str) or label.upper() not in labels:
+        raise FeedbackError(f"label must be one of the catalog's labels: {sorted(labels)}")
+    label = label.upper()
+    with store.locked(src.name):
+        entries = store.entries(src.name)
+        norm = normalize_text(text)
+        for e in entries.values():
+            if e["status"] == "pending" and e["label"] == label and normalize_text(e["text"]) == norm:
+                return {**_receipt(e), "duplicate": True}
+        if sum(1 for e in entries.values() if e["status"] == "pending") >= MAX_PENDING:
+            raise FeedbackError(f"too many pending corrections for {src.name} (max {MAX_PENDING}); review the queue first")
+        pred = svc.classify(text, src.name, 1)
+        event = {
+            "event": "submitted",
+            "id": "fb_" + secrets.token_hex(6),
+            "ts": _now(),
+            "catalog": src.name,
+            "text": text,
+            "label": label,
+            "predicted": pred["predictions"][0]["label"],
+            "model_version": pred["model_version"],
+            "submitter": submitter,
+        }
+        store._append(src.name, event)
+        return {**_receipt(store.entries(src.name)[event["id"]]), "duplicate": False}
+
+
+def transition(store: FeedbackStore, catalog: str, fid: Any, event: str, actor: str, reason: Any = None) -> dict[str, Any]:
+    """Withdraw, approve or reject one entry. Apply and rollback have their own functions."""
+    if event not in ("withdrawn", "approved", "rejected"):
+        raise FeedbackError("unsupported transition")
+    if not isinstance(fid, str) or not _ID_RE.match(fid):
+        raise FeedbackError("invalid feedback id")
+    with store.locked(catalog):
+        entry = store.entries(catalog).get(fid)
+        if entry is None:
+            raise FeedbackError(f"no feedback entry {fid} in {catalog}")
+        if entry["status"] not in ALLOWED_FROM[event]:
+            raise FeedbackError(f"cannot mark {fid} {event}: it is {entry['status']}")
+        store._append(catalog, {"event": event, "id": fid, "ts": _now(), "actor": actor, "reason": _reason(reason)})
+        return _receipt(store.entries(catalog)[fid])
+
+
+BULK_RELABEL_MIN = 5  # this many corrections moving one predicted label to one other label is flagged
+
+
+def anomaly_warnings(svc: "Service", catalog: str, current_pipe, candidates: list[dict[str, Any]]) -> list[str]:
+    """Signals for the human reviewer. They never block: the held-out gate cannot see
+    attacks aimed away from the test set (for example a trigger word), so review is the
+    real control and these point the reviewer at what to look at."""
+    if not candidates:
+        return []
+    import numpy as np
+
+    out = []
+    threshold, _ = svc._calibrate(catalog)
+    scores = current_pipe.decision_function([e["text"] for e in candidates])
+    order = np.argsort(-scores, axis=1)
+    rows = np.arange(len(candidates))
+    margins = scores[rows, order[:, 0]] - scores[rows, order[:, 1]]
+    preds = current_pipe.classes_[order[:, 0]]
+    confident_overrides = [e["id"] for e, p, m in zip(candidates, preds, margins) if p != e["label"] and m >= threshold]
+    if confident_overrides:
+        out.append(f"{len(confident_overrides)} correction(s) contradict a confident model prediction: {confident_overrides[:10]}")
+    pairs: dict[tuple[str, str], int] = {}
+    for e, p in zip(candidates, preds):
+        if p != e["label"]:
+            pairs[(str(p), e["label"])] = pairs.get((str(p), e["label"]), 0) + 1
+    for (a, b), n in sorted(pairs.items()):
+        if n >= BULK_RELABEL_MIN:
+            out.append(f"{n} corrections relabel {a} as {b} in one batch")
+    return out
+
+
+def apply(
+    svc: "Service",
+    store: FeedbackStore,
+    catalog: str,
+    actor: str = "cli",
+    weight: float = CORRECTION_WEIGHT,
+    tolerance: float = GATE_TOLERANCE,
+    force: bool = False,
+    reason: Any = None,
+) -> dict[str, Any]:
+    """Train on applied + approved corrections, compare held-out scores, and apply if the gate passes.
+
+    Approved corrections whose text matches a held-out test record are rejected, so the
+    test split never leaks into training. With `force`, a failed gate is overridden and the
+    override is recorded with its reason.
+    """
+    src = svc._catalog(catalog)
+    reason = _reason(reason)
+    if force and not reason:
+        raise FeedbackError("--force requires a reason")
+    if not 0 < weight <= 100:
+        raise FeedbackError("weight must be in (0, 100]")
+    with store.locked(src.name):
+        entries = store.entries(src.name)
+        approved = [e for e in entries.values() if e["status"] == "approved"]
+        if not approved:
+            return {"catalog": src.name, "applied": [], "message": "nothing approved to apply"}
+        test_texts = {normalize_text(r["text"]) for r in svc._load(src.name)[1]}
+        leaked = [e for e in approved if normalize_text(e["text"]) in test_texts]
+        for e in leaked:
+            store._append(src.name, {"event": "rejected", "id": e["id"], "ts": _now(), "actor": "system", "reason": "text matches a held-out test record"})
+        candidates = [e for e in approved if e not in leaked]
+        if not candidates:
+            return {"catalog": src.name, "applied": [], "rejected_as_test_leak": [e["id"] for e in leaked]}
+
+        current = [e for e in entries.values() if e["status"] == "applied"]
+        current_pipe = svc.fit(src.name, current)
+        before = svc.heldout_scores(src.name, current_pipe)
+        warnings = anomaly_warnings(svc, src.name, current_pipe, candidates)
+        new = [{**e, "weight": weight} for e in candidates]
+        pipe = svc.fit(src.name, current + new)
+        after = svc.heldout_scores(src.name, pipe)
+        drop = before["macro_f1"] - after["macro_f1"]
+        passed = drop <= tolerance
+        gate = {"before": before, "after": after, "macro_f1_drop": round(drop, 4), "tolerance": tolerance, "passed": passed}
+        report = {
+            "catalog": src.name,
+            "gate": gate,
+            "rejected_as_test_leak": [e["id"] for e in leaked],
+            "weight": weight,
+            "warnings": warnings,
+        }
+        if not passed and not force:
+            return {**report, "applied": [], "message": "held-out score dropped more than the tolerance; nothing applied"}
+        preds = pipe.predict([e["text"] for e in candidates])
+        for e in candidates:
+            store._append(
+                src.name,
+                {
+                    "event": "applied",
+                    "id": e["id"],
+                    "ts": _now(),
+                    "actor": actor,
+                    "weight": weight,
+                    "gate": gate,
+                    "forced": bool(force and not passed),
+                    "reason": reason,
+                },
+            )
+        report["applied"] = [
+            {"id": e["id"], "label": e["label"], "model_now_predicts": str(p), "now_correct": str(p) == e["label"]}
+            for e, p in zip(candidates, preds)
+        ]
+        report["forced"] = bool(force and not passed)
+        return report
+
+
+def rollback(store: FeedbackStore, catalog: str, fids: list[str], actor: str = "cli", reason: Any = None) -> dict[str, Any]:
+    reason = _reason(reason)
+    with store.locked(catalog):
+        entries = store.entries(catalog)
+        for fid in fids:
+            if not _ID_RE.match(fid) or fid not in entries:
+                raise FeedbackError(f"no feedback entry {fid} in {catalog}")
+            if entries[fid]["status"] != "applied":
+                raise FeedbackError(f"cannot roll back {fid}: it is {entries[fid]['status']}")
+        for fid in fids:
+            store._append(catalog, {"event": "rolled_back", "id": fid, "ts": _now(), "actor": actor, "reason": reason})
+    return {"catalog": catalog, "rolled_back": fids}
+
+
+def reset(store: FeedbackStore, catalog: str, actor: str = "cli", reason: Any = "reset") -> dict[str, Any]:
+    """Roll back every applied correction for a catalog. The history is kept."""
+    ids = [e["id"] for e in store.applied(catalog)]
+    if not ids:
+        return {"catalog": catalog, "rolled_back": []}
+    return rollback(store, catalog, ids, actor, reason)
+
+
+# ---- CLI ------------------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    from scriptorium.service import Service
+
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--catalog", default="nist")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("submit")
+    s.add_argument("--text", required=True)
+    s.add_argument("--label", required=True)
+    ls = sub.add_parser("list")
+    ls.add_argument("--status", choices=sorted(set(STATUS_AFTER.values())))
+    sh = sub.add_parser("show")
+    sh.add_argument("id")
+    for name in ("approve", "reject", "withdraw"):
+        p = sub.add_parser(name)
+        p.add_argument("id")
+        p.add_argument("--reason")
+    a = sub.add_parser("apply")
+    a.add_argument("--weight", type=float, default=CORRECTION_WEIGHT)
+    a.add_argument("--tolerance", type=float, default=GATE_TOLERANCE)
+    a.add_argument("--force", action="store_true")
+    a.add_argument("--reason")
+    r = sub.add_parser("rollback")
+    r.add_argument("ids", nargs="+")
+    r.add_argument("--reason")
+    rs = sub.add_parser("reset")
+    rs.add_argument("--reason", default="reset")
+    args = ap.parse_args(argv)
+
+    svc = Service.default()
+    store = svc.feedback
+    try:
+        if args.cmd == "submit":
+            out: Any = submit(svc, store, args.catalog, args.text, args.label)
+        elif args.cmd == "list":
+            out = [
+                {k: e[k] for k in ("id", "status", "label", "predicted", "ts")} | {"text": e["text"][:80]}
+                for e in store.entries(args.catalog).values()
+                if args.status is None or e["status"] == args.status
+            ]
+        elif args.cmd == "show":
+            out = store.entries(args.catalog).get(args.id) or {"error": f"no entry {args.id}"}
+        elif args.cmd in ("approve", "reject", "withdraw"):
+            event = {"approve": "approved", "reject": "rejected", "withdraw": "withdrawn"}[args.cmd]
+            out = transition(store, args.catalog, args.id, event, "cli", args.reason)
+        elif args.cmd == "apply":
+            out = apply(svc, store, args.catalog, "cli", args.weight, args.tolerance, args.force, args.reason)
+        elif args.cmd == "rollback":
+            out = rollback(store, args.catalog, args.ids, "cli", args.reason)
+        else:
+            out = reset(store, args.catalog, "cli", args.reason)
+    except (FeedbackError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -92,6 +92,28 @@ Security properties, each covered by a test:
 - If SCF is built locally, tool results can contain SCF control text and are sent to whichever client you connect. Connect only clients you trust.
 - Every response says its results are suggestions that need human review.
 
+## Corrections (feedback) with approval and rollback
+
+Users can submit corrections ("that's not AC, it's IA"). A correction changes the model only after an admin approves it and applies it, and only if the frozen held-out score does not drop. Everything is local, under `~/.scriptorium/feedback/`.
+
+```bash
+uv run python -m scriptorium.feedback --catalog nist submit --text "..." --label IA   # returns a receipt with an ID
+uv run python -m scriptorium.feedback --catalog nist list --status pending
+uv run python -m scriptorium.feedback --catalog nist approve fb_123456789abc --reason "..."
+uv run python -m scriptorium.feedback --catalog nist apply                              # gate + report
+uv run python -m scriptorium.feedback --catalog nist rollback fb_123456789abc --reason "..."
+uv run python -m scriptorium.feedback --catalog nist reset                              # roll back all applied
+```
+
+How it works:
+- **Append-only log.** Status (`pending`, `approved`, `applied`, `withdrawn`, `rejected`, `rolled_back`) is derived by replaying events, so every change has a history. The log is private to your user account (`0600`). A corrupt or tampered log is refused rather than partly used.
+- **Pending and approved entries never change a model.** `apply` refits on the training split plus applied corrections, each with a training weight (default 5, a starting guess). It compares held-out macro-F1 before and after and applies nothing if the drop exceeds the tolerance (default 0.02). `--force` overrides a failed gate only with a reason, and the override is recorded.
+- **The test split never leaks into training.** An approved correction whose text matches a held-out record is rejected.
+- **Rollback is exact.** Rolling back restores the previous model version, and every response reports `model_version`.
+- **Exact matches are surfaced.** If a query matches an applied correction's text, the response includes `applied_correction` next to the model's own prediction.
+
+**What the gate does not catch.** It blocks broad poisoning that hurts held-out accuracy (tested). A targeted attack, such as many corrections that tie a trigger word to a wrong label, leaves held-out records alone and passes the gate. A test documents this. The control for that is human review, which is why approval is required. `apply` also reports warnings for corrections that contradict a confident prediction and for bulk relabelling of one label as another.
+
 ## Development
 
 ```bash
