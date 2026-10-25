@@ -92,10 +92,13 @@ class Outcome:
 
 
 def build_requests(items: list[dict[str, Any]], prompt: Prompt, families: dict[str, str], *, model: str, effort: str,
-                   thinking: str, max_tokens: int) -> list[LLMRequest]:
+                   thinking: str, max_tokens: int, user_messages: list[str] | None = None) -> list[LLMRequest]:
     system = system_prompt(prompt, families)
     schema = json_schema(list(families))
-    return [LLMRequest(model, system, user_message(r["text"]), schema, max_tokens, effort, thinking) for r in items]
+    msgs = user_messages if user_messages is not None else [user_message(r["text"]) for r in items]
+    if len(msgs) != len(items):
+        raise ValueError("one user message per item is required")
+    return [LLMRequest(model, system, m, schema, max_tokens, effort, thinking) for m in msgs]
 
 
 def run_items(client: CachedClient, items: list[dict[str, Any]], requests: list[LLMRequest], codes: list[str], workers: int = 4) -> list[Outcome]:
@@ -217,3 +220,35 @@ def compare_with_sklearn(outcomes: list[Outcome], sk_pred: dict[str, str], label
         "only_sklearn_right": int((~l_ok & s_ok).sum()),
         "neither_right": int((~l_ok & ~s_ok).sum()),
     }
+
+
+def compare_runs(a: list[Outcome], b: list[Outcome], labels: list[str], n_boot: int = baseline.N_BOOTSTRAP, seed: int = baseline.SEED,
+                 only_ids: set[str] | None = None) -> dict[str, Any]:
+    """Paired comparison of two LLM runs over the items both scored: b minus a, bootstrap over base controls."""
+    bmap = {o.id: o for o in b if o.status != "not_run"}
+    done = [o for o in a if o.status != "not_run" and o.id in bmap and (only_ids is None or o.id in only_ids)]
+    if not done:
+        return {"n_paired": 0}
+    y = np.array([o.true for o in done])
+    pa = np.array([o.pred if o.pred is not None else INVALID for o in done])
+    pb = np.array([bmap[o.id].pred if bmap[o.id].pred is not None else INVALID for o in done])
+    a_ok, b_ok = pa == y, pb == y
+    diff = lambda idx: {
+        "accuracy_diff": float(b_ok[idx].mean() - a_ok[idx].mean()),
+        "macro_f1_diff": _metrics(y[idx], pb[idx], labels)["macro_f1"] - _metrics(y[idx], pa[idx], labels)["macro_f1"],
+    }
+    return {
+        "n_paired": len(done),
+        "a": _metrics(y, pa, labels), "b": _metrics(y, pb, labels),
+        "b_minus_a": diff(np.arange(len(done))),
+        "b_minus_a_ci95": _boot([o.base_id for o in done], diff, n_boot, seed),
+        "both_right": int((a_ok & b_ok).sum()), "only_a_right": int((a_ok & ~b_ok).sum()),
+        "only_b_right": int((~a_ok & b_ok).sum()), "neither_right": int((~a_ok & ~b_ok).sum()),
+    }
+
+
+def h1_supported(cmp: dict[str, Any]) -> bool:
+    """The pre-registered rule: 95% interval lower bound for the macro-F1 difference above 0, accuracy not lower."""
+    if not cmp.get("n_paired"):
+        return False
+    return cmp["b_minus_a_ci95"]["macro_f1_diff"][0] > 0 and cmp["b_minus_a"]["accuracy_diff"] >= 0

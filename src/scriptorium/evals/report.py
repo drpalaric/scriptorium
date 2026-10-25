@@ -33,7 +33,8 @@ def _versions() -> dict[str, str]:
 
 def build_report(*, model: str, prompt: Prompt, sample: LLMRequest, outcomes: list[mapping.Outcome], labels: list[str],
                  sk_pred: dict[str, str] | None, live_calls: int, cache_hits: int, spent_this_run: float, budget_usd: float | None,
-                 replay: bool, limit: int | None, n_boot: int) -> dict[str, Any]:
+                 replay: bool, limit: int | None, n_boot: int, split: str = "test", condition: str = "none",
+                 only_enhancements: bool = False, k: int | None = None, input_fingerprint: str | None = None) -> dict[str, Any]:
     manifest = json.loads(ingest.MANIFEST_PATH.read_text(encoding="utf-8"))
     scored = mapping.score(outcomes, labels, n_boot)
     status = Counter(o.status for o in outcomes)
@@ -45,7 +46,9 @@ def build_report(*, model: str, prompt: Prompt, sample: LLMRequest, outcomes: li
         "model": model,
         "prompt": {"task": prompt.task, "version": prompt.version, "sha256": prompt.sha256},
         "request_parameters": {"effort": sample.effort, "thinking": sample.thinking, "max_tokens": sample.max_tokens},
-        "data": {"split": "test", "limit": limit, "source_commit": manifest["source"]["commit"], "test_sha256": manifest["outputs"]["test.jsonl"]},
+        "data": {"split": split, "limit": limit, "only_enhancements": only_enhancements, "source_commit": manifest["source"]["commit"],
+                 "train_sha256": manifest["outputs"]["train.jsonl"], "test_sha256": manifest["outputs"]["test.jsonl"]},
+        "condition": {"name": condition, "examples_k": k if condition.startswith("examples") else None, "input_sha256_16": input_fingerprint},
         "items": {"total": len(outcomes), "scored": len(outcomes) - n_not_run, "not_run": n_not_run, "complete": n_not_run == 0},
         "status_counts": dict(sorted(status.items())),
         "metrics": scored,
@@ -62,6 +65,7 @@ def build_report(*, model: str, prompt: Prompt, sample: LLMRequest, outcomes: li
             "budget_usd": budget_usd,
             "prices_as_of": PRICES_AS_OF,
         },
+        "predictions": [{"id": o.id, "true": o.true, "pred": o.pred, "status": o.status} for o in outcomes],
         "versions": _versions(),
         "caveats": [
             "Costs are computed from recorded token counts at listed prices and may differ from the invoice.",
@@ -79,6 +83,7 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"# Evaluation report: {r['task']}", "",
         f"- Model: `{r['model']}`", f"- Prompt: `{r['prompt']['task']}/{r['prompt']['version']}` (sha256 `{r['prompt']['sha256'][:12]}`)",
         f"- Parameters: effort `{r['request_parameters']['effort']}`, thinking `{r['request_parameters']['thinking']}`, max_tokens {r['request_parameters']['max_tokens']}",
+        f"- Split: `{r['data']['split']}`" + (" (enhancements only)" if r['data'].get('only_enhancements') else "") + f", condition `{r['condition']['name']}`",
         f"- Date (UTC): {r['created_utc']}", f"- Mode: {r['mode']}",
         f"- Items: {it['scored']} scored of {it['total']}" + ("" if it["complete"] else " (**incomplete**)"),
         f"- Statuses: {r['status_counts']}",
