@@ -1,0 +1,50 @@
+{
+ "note": "Records describing this project's own AI components. Evidence hashes are the SHA-256 of the committed result files.",
+ "systems": [
+  {
+   "owner": "Phil Alger (project owner)",
+   "incident_contact": "GitHub issues on drpalaric/scriptorium",
+   "last_review": "2026-10-25",
+   "review_interval_days": 180,
+   "id": "scriptorium-baseline-classifier",
+   "purpose": "Classify NIST requirement text into a control family (scikit-learn, runs locally)",
+   "risk_tier": "low",
+   "model_provider": "internal",
+   "data_classification": "public",
+   "personal_data": false,
+   "human_oversight": true,
+   "logging_enabled": true,
+   "evaluation_evidence": [
+    {
+     "report": "results/baseline_metrics.json",
+     "sha256": "529192beaa9b57d76cff38b8e4881777a5691b776bf515f779b47b9a1f84977c"
+    }
+   ]
+  },
+  {
+   "owner": "Phil Alger (project owner)",
+   "incident_contact": "GitHub issues on drpalaric/scriptorium",
+   "last_review": "2026-10-25",
+   "review_interval_days": 180,
+   "id": "scriptorium-llm-mapping",
+   "purpose": "Classify NIST requirement text into a control family with an LLM (Claude Sonnet 5.5 via the Anthropic API)",
+   "risk_tier": "medium",
+   "model_provider": "external",
+   "external_api_approved": true,
+   "data_classification": "public",
+   "personal_data": false,
+   "human_oversight": true,
+   "logging_enabled": true,
+   "evaluation_evidence": [
+    {
+     "report": "results/llm/mapping-claude-sonnet-5-5-v1-20261025T013446Z.json",
+     "sha256": "ad4cc128f635d4bc96827071ec8f11d268ca0c2c002812d338c214b9428d56d3"
+    },
+    {
+     "report": "results/llm/injection/injection-claude-sonnet-5-5-20261025T162247Z-summary.json",
+     "sha256": "86dfb4d2fafd143b320a83ac175d56df1baa72f58efc3a3a3afc5647ed338024"
+    }
+   ]
+  }
+ ]
+}

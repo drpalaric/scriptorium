@@ -18,7 +18,7 @@ Policy-as-code and control mapping for AI governance. Public data only; no emplo
 | Local API with user and admin tokens | FastAPI, loopback only | Built, tested; [security notes](docs/security.md) |
 | LLM evaluation harness (control mapping) | Anthropic API, Pydantic, cache and replay | Built; one real run below |
 | Pre-registered prompt experiment | dev split only | Done; test split not used |
-| Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
+| Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Built; tested in CI |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
 | Prompt-injection test | 8 attack variants, ablation, sklearn contrast | Done; results below |
 | Duplicate detection (scikit-learn vs LLM) | char n-gram TF-IDF, LLM judge | Done; results below |
@@ -120,6 +120,23 @@ uv run python -m scriptorium.sources        # what is registered, with hashes an
 ### Prompt-injection test (pre-registered)
 
 Eight label-flipping attacks, 200 items each ([protocol](docs/experiments/injection.md), [results](docs/experiments/injection-results.md)). With the production prompt the model produced the attacker's chosen family **once in 1,600 attacked requests** (95% CI 0.000 to 0.002 for the pooled rate). With the "untrusted data" sentence removed the rate was 0.121, and one attack that offers a fallback fitting the output schema reached 0.745. Attacks that did not hijack the label still cost a few points of accuracy. One model, fixed non-adaptive templates: a measurement, not a safety guarantee.
+
+### Policy-as-code (OPA / Rego)
+
+Two policy packages in [`policy/`](policy/), each rule carrying its NIST SP 800-53 controls in machine-readable metadata (the assignment is my judgment, not an official mapping, and says so):
+- **Change control over the audit log** (8 rules): approver differs from submitter (AC-5), apply only after approval (CM-3, CM-5), apply needs a passing recorded gate or a forced override with a reason (CM-4, SA-11), administrators only (AC-6), complete events (AU-3), and the hash chain verifies (SI-7, AU-9). A `single_operator` option turns separation-of-duties findings into *accepted exceptions*, never silent passes.
+- **AI-system records** (8 rules): inventory fields (CM-8, PM-5), human oversight for high risk (RA-3), **verified** evaluation evidence (CA-2, SA-11), approved external providers (SA-9), no restricted data to external providers (AC-4, SC-7), personal data classification (RA-2), logging (AU-2, AU-12), review currency (CA-7).
+
+```bash
+uv run python -m scriptorium.policy check-audit                       # evaluate the real audit log
+uv run python -m scriptorium.policy check-systems examples/ai_systems.json
+uv run python -m scriptorium.policy controls                          # every rule with its controls, plus published CIS/ISO equivalents
+opa test policy/ --coverage                                            # 34 Rego tests, 100% coverage
+```
+
+Evidence in a system record counts only if its report is a file inside the repository whose SHA-256 matches, checked in Python before the policy runs, so invented hashes fail. `examples/ai_systems.json` describes this project's own components and passes; `examples/ai_systems_noncompliant.json` is fictional and trips every rule. Run on the real audit log, the policy found one genuine issue (one operator approved their own corrections, which is why `single_operator` exists) and exposed one bug in the rules themselves (older events used a plain `cli` actor), now fixed and tested. CI runs `opa fmt`, `opa check --strict` and the tests with a coverage floor.
+
+**Why OPA, not Cedar or Kyverno** (my assessment, not a benchmark): Cedar is built for authorization decisions (may this principal do this action on this resource), and Kyverno for Kubernetes resources. These checks are compliance rules over arbitrary JSON records, which is what Rego and `opa test` are for.
 
 ### Duplicate detection: scikit-learn against an LLM (pre-registered)
 

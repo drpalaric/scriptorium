@@ -1,0 +1,41 @@
+{
+ "note": "FICTIONAL systems written to trigger rules, for demonstration only.",
+ "systems": [
+  {
+   "id": "fictional-resume-screener",
+   "purpose": "",
+   "risk_tier": "high",
+   "model_provider": "external",
+   "data_classification": "restricted",
+   "personal_data": true,
+   "human_oversight": false,
+   "logging_enabled": false,
+   "last_review": "2024-01-15",
+   "review_interval_days": 365,
+   "evaluation_evidence": [
+    {
+     "report": "vendor-brochure.pdf",
+     "sha256": "n/a"
+    }
+   ]
+  },
+  {
+   "id": "fictional-chat-assistant",
+   "owner": "Support team",
+   "purpose": "Answer customer questions",
+   "risk_tier": "medium",
+   "incident_contact": "support@example.invalid",
+   "model_provider": "external",
+   "personal_data": true,
+   "data_classification": "internal",
+   "logging_enabled": true,
+   "last_review": "2026-09-01",
+   "evaluation_evidence": [
+    {
+     "report": "redteam.json",
+     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+   ]
+  }
+ ]
+}

@@ -31,6 +31,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1 # v2.4.0
+        with:
+          version: 1.21.3
       - name: Install from the lockfile (fails if it is out of date)
         run: uv sync --locked
       - name: Fetch the pinned NIST catalog (verifies its SHA-256)
@@ -39,7 +42,9 @@ jobs:
         run: |
           uv run python -m scriptorium.ingest build
           git diff --exit-code -- data/
-      - name: Tests
+      - name: Tests (OPA is required, so policy tests cannot silently skip)
+        env:
+          REQUIRE_OPA: "1"
         run: uv run pytest -q
 
   audit:
@@ -52,3 +57,20 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - name: Audit locked dependencies for known vulnerabilities
         run: uv audit --locked --preview-features audit-command
+
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1 # v2.4.0
+        with:
+          version: 1.21.3
+      - name: Rego is formatted
+        run: opa fmt --fail -l policy/
+      - name: Rego passes the strict type check
+        run: opa check --strict policy/
+      - name: Policy tests, with a coverage floor
+        run: opa test policy/ --coverage --threshold 95 -f pretty
