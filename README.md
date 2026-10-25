@@ -12,7 +12,7 @@ Policy-as-code and control mapping for AI governance. Public data only; no emplo
 | Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Stage 2, results below |
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
-| Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Control-mapping task built and tested with fake clients; **no real run yet, so no LLM results**. Other tasks not started |
+| Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Control-mapping task built and run once (see results below). Other tasks not started |
 
 ### Design notes
 
@@ -47,9 +47,9 @@ How to read this:
 - Cross-validation and test scores agree closely, which suggests the model was not tuned to the test split.
 - Family prediction is a stand-in for control mapping. It does not show the model can pick the exact control.
 
-## LLM evaluation: control mapping (built, not yet run)
+## LLM evaluation: control mapping
 
-`scriptorium.evals` asks a Claude model to put each held-out NIST requirement into a control family and scores it on the **same 184 items** as the scikit-learn baseline, with a paired comparison. **No LLM result exists yet.** Every number will come from a real run with your own credentials, and none is published here until then.
+`scriptorium.evals` asks a Claude model to put each held-out NIST requirement into a control family and scores it on the **same 184 items** as the scikit-learn baseline, with a paired comparison. Every number comes from a real run; the full report is in [`results/llm/`](results/llm/).
 
 ```bash
 uv sync --extra llm
@@ -67,7 +67,25 @@ uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --repl
 - **Spend controls:** `run` refuses to call the API without `--yes`, refuses if the rough projection exceeds `--budget-usd` (default 5), and stops making new calls when recorded spend reaches the cap. At most `--workers` calls already in flight can finish after that, so the cap can be overshot by a few calls. Projections are offline estimates, not quotes, and prices are copied from a dated reference (`budget.py`) that can go stale. Unpriced models are refused.
 - **What is sent:** NIST requirement statements (public domain) and the family list. SCF text is never sent.
 - **Model settings:** thinking is left adaptive at `low` effort by default (`--thinking off` sends the Sonnet 5.5 thinking-off setting). Sampling parameters, forced tool choice and assistant prefill are not sent, because these models reject them. Model output is not deterministic, so a fresh run can differ from a cached one.
-- **Verified so far** with fake clients and a loopback server standing in for the API: request shape on the wire, error handling, cache, budget, replay and scoring. **Not verified against the real API.**
+- **Tested** with fake clients and a loopback server standing in for the API (request shape on the wire, errors, cache, budget, replay, scoring), and run once for real as described below.
+
+### First real run (one run, one model, one prompt)
+
+`claude-sonnet-5-5`, prompt `mapping/v1` (sha256 `d631630734b7`), adaptive thinking at low effort, run 2026-10-25. All 184 answers were valid. Recorded cost for all answers: about $0.085. Replaying from the cache reproduced it exactly.
+
+| | LLM | sklearn baseline | LLM minus sklearn (paired, 95% CI) |
+|---|---|---|---|
+| Accuracy | 0.875 (0.807 to 0.937) | 0.522 | +0.353 (+0.237 to +0.479) |
+| Macro-F1 | 0.893 (0.812 to 0.938) | 0.503 | +0.391 (+0.292 to +0.484) |
+
+On the same items, both were right on 89, only the LLM on 72, only sklearn on 7, and neither on 16. Intervals resample whole base controls. Weakest families by F1 included PL (4 test items), SI and SC.
+
+**Read this before quoting it:**
+- **The model may have seen this text.** NIST SP 800-53 is public and widely reproduced, so a large model may partly recall which family each control belongs to. This run cannot separate recall from understanding. The sklearn baseline learned from 830 records only. The comparison is "zero-shot LLM against a small supervised model", not a test of generalisation to unseen frameworks.
+- **The prompt names all 20 families with their titles**, which is a strong hint on its own.
+- **One run, one prompt, one model.** Model output varies between runs and prompt wording matters. No prompt tuning was done, and no other model was tried.
+- **Family prediction is a coarse stand-in for control mapping** (see above).
+- **The cost projection was too high** (about $0.63 projected for this run, $0.069 actual) because the system prompt was served from the prompt cache.
 
 ## Optional: Secure Controls Framework (SCF)
 

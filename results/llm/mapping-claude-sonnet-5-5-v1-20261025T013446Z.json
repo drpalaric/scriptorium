@@ -1,0 +1,235 @@
+{
+ "task": "mapping",
+ "created_utc": "2026-10-25T01:34:46+00:00",
+ "mode": "live",
+ "model": "claude-sonnet-5-5",
+ "prompt": {
+  "task": "mapping",
+  "version": "v1",
+  "sha256": "d631630734b76f4b9393a4baa1e33712c445ccf8de96f74c5ab6bf78070b5b2c"
+ },
+ "request_parameters": {
+  "effort": "low",
+  "thinking": "adaptive",
+  "max_tokens": 1024
+ },
+ "data": {
+  "split": "test",
+  "limit": null,
+  "source_commit": "f0de6d8d8c059d374f15e0ae07508d82e370fc1d",
+  "test_sha256": "ccf43b1cc5003f0bce2e7bc0cb60cce7742bed784c68a78ad25efaf88b9bc3a4"
+ },
+ "items": {
+  "total": 184,
+  "scored": 184,
+  "not_run": 0,
+  "complete": true
+ },
+ "status_counts": {
+  "ok": 184
+ },
+ "metrics": {
+  "n_scored": 184,
+  "accuracy": 0.875,
+  "macro_f1": 0.8933360175561316,
+  "ci95": {
+   "accuracy": [
+    0.807317253625333,
+    0.9369172014700236
+   ],
+   "macro_f1": [
+    0.8123834376066623,
+    0.9384770211482251
+   ]
+  },
+  "per_family": {
+   "AC": {
+    "precision": 0.9090909090909091,
+    "recall": 0.9090909090909091,
+    "f1": 0.9090909090909091,
+    "support": 11,
+    "low_support": false
+   },
+   "AT": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 1,
+    "low_support": true
+   },
+   "AU": {
+    "precision": 0.6666666666666666,
+    "recall": 1.0,
+    "f1": 0.8,
+    "support": 6,
+    "low_support": false
+   },
+   "CA": {
+    "precision": 0.8571428571428571,
+    "recall": 1.0,
+    "f1": 0.923076923076923,
+    "support": 6,
+    "low_support": false
+   },
+   "CM": {
+    "precision": 0.8181818181818182,
+    "recall": 1.0,
+    "f1": 0.9,
+    "support": 9,
+    "low_support": false
+   },
+   "CP": {
+    "precision": 0.9230769230769231,
+    "recall": 1.0,
+    "f1": 0.9600000000000001,
+    "support": 12,
+    "low_support": false
+   },
+   "IA": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 11,
+    "low_support": false
+   },
+   "IR": {
+    "precision": 0.8823529411764706,
+    "recall": 0.8333333333333334,
+    "f1": 0.8571428571428571,
+    "support": 18,
+    "low_support": false
+   },
+   "MA": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 2,
+    "low_support": true
+   },
+   "MP": {
+    "precision": 0.75,
+    "recall": 1.0,
+    "f1": 0.8571428571428571,
+    "support": 3,
+    "low_support": true
+   },
+   "PE": {
+    "precision": 0.9,
+    "recall": 0.9,
+    "f1": 0.9,
+    "support": 10,
+    "low_support": false
+   },
+   "PL": {
+    "precision": 1.0,
+    "recall": 0.5,
+    "f1": 0.6666666666666666,
+    "support": 4,
+    "low_support": true
+   },
+   "PM": {
+    "precision": 0.8333333333333334,
+    "recall": 0.8333333333333334,
+    "f1": 0.8333333333333334,
+    "support": 6,
+    "low_support": false
+   },
+   "PS": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 2,
+    "low_support": true
+   },
+   "PT": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 4,
+    "low_support": true
+   },
+   "RA": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "support": 11,
+    "low_support": false
+   },
+   "SA": {
+    "precision": 0.8235294117647058,
+    "recall": 1.0,
+    "f1": 0.9032258064516129,
+    "support": 14,
+    "low_support": false
+   },
+   "SC": {
+    "precision": 0.9523809523809523,
+    "recall": 0.6666666666666666,
+    "f1": 0.7843137254901961,
+    "support": 30,
+    "low_support": false
+   },
+   "SI": {
+    "precision": 0.7391304347826086,
+    "recall": 0.8095238095238095,
+    "f1": 0.7727272727272727,
+    "support": 21,
+    "low_support": false
+   },
+   "SR": {
+    "precision": 1.0,
+    "recall": 0.6666666666666666,
+    "f1": 0.8,
+    "support": 3,
+    "low_support": true
+   }
+  }
+ },
+ "comparison_with_sklearn": {
+  "n_paired": 184,
+  "sklearn": {
+   "accuracy": 0.5217391304347826,
+   "macro_f1": 0.5026677262510467
+  },
+  "llm_minus_sklearn": {
+   "accuracy_diff": 0.3532608695652174,
+   "macro_f1_diff": 0.39066829130508485
+  },
+  "llm_minus_sklearn_ci95": {
+   "accuracy_diff": [
+    0.2369610213753748,
+    0.47875026864388565
+   ],
+   "macro_f1_diff": [
+    0.29212004435040456,
+    0.4843438093311774
+   ]
+  },
+  "both_right": 89,
+  "only_llm_right": 72,
+  "only_sklearn_right": 7,
+  "neither_right": 16
+ },
+ "usage": {
+  "input_tokens": 14875,
+  "output_tokens": 2196,
+  "cache_read_tokens": 128340,
+  "cache_write_tokens": 2852,
+  "recorded_cost_usd_all_answers": 0.084508,
+  "spent_this_run_usd": 0.069338,
+  "live_calls": 164,
+  "answers_from_cache": 20,
+  "budget_usd": 5.0,
+  "prices_as_of": "2026-10-06"
+ },
+ "versions": {
+  "python": "3.14.9",
+  "scikit_learn": "1.9.1",
+  "numpy": "2.5.4",
+  "anthropic_sdk": "2.3.0"
+ },
+ "caveats": [
+  "Costs are computed from recorded token counts at listed prices and may differ from the invoice.",
+  "Model output is not deterministic; answers served from the cache are reproducible, new calls may differ."
+ ]
+}
