@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"  # weekly, so the dependency audit notices new advisories
+
+# Least privilege: the workflow only reads the repository. It uses no secrets and makes no API calls.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install from the lockfile (fails if it is out of date)
+        run: uv sync --locked
+      - name: Fetch the pinned NIST catalog (verifies its SHA-256)
+        run: uv run python -m scriptorium.ingest fetch
+      - name: The committed dataset must be exactly what the pipeline rebuilds
+        run: |
+          uv run python -m scriptorium.ingest build
+          git diff --exit-code -- data/
+      - name: Tests
+        run: uv run pytest -q
+
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Audit locked dependencies for known vulnerabilities
+        run: uv audit --locked --preview-features audit-command
