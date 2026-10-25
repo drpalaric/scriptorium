@@ -22,12 +22,12 @@ Threat model: a single user's machine, serving `localhost` only. Attackers consi
 
 ## LLM application risks (2025 list)
 
-No LLM is called by the current code, so several risks do not apply yet. They are listed so the later Claude-based reviewer is built against them.
+The only code that calls an LLM is the opt-in evaluation harness (`scriptorium.evals`); the API, MCP server and feedback store call none. Several risks therefore apply only to the harness, and the planned reviewer will be built against the rest.
 
 | Risk | Status |
 |---|---|
-| LLM01 Prompt injection | Not applicable today: user text never reaches a model. **Planned reviewer:** feedback text will be passed as quoted data, the reply must validate against a schema, and the reviewer will have no tools and no write access. Injection-style strings are already tested as plain data. |
-| LLM02 Sensitive information disclosure | SCF content and SCF-derived models stay local. Nothing is sent to an external API. Any future use of SCF text with the Claude API will be opt-in only. |
+| LLM01 Prompt injection | The harness quotes requirement text inside `<requirement>` tags with any look-alike tag neutralised, tells the model the text is untrusted data, and gives it no tools. The reply must match a strict schema or it counts as a failure. A prompt-injection robustness task is planned but not built, so resistance is **untested**. **Planned reviewer:** the same treatment, and no write access. |
+| LLM02 Sensitive information disclosure | SCF content and SCF-derived models stay local, and the harness never sends SCF text. It sends only NIST statements (public domain) and the family list. The API key is read from the environment and never stored, logged, cached or reported (a test plants a fake key and searches every output file for it). API error text is redacted and length-capped before display. |
 | LLM03 Supply chain | Pinned lockfile; no third-party models downloaded. |
 | LLM04 Data and model poisoning | Approval step, held-out gate with tolerance, anomaly warnings, per-submitter attribution, rollback. **Known limit below.** |
 | LLM05 Improper output handling | API responses are JSON built from validated values; no model output is executed. The UI must escape text it displays (stage 4). |
@@ -35,7 +35,7 @@ No LLM is called by the current code, so several risks do not apply yet. They ar
 | LLM07 System prompt leakage | Not applicable: no system prompt. |
 | LLM08 Vector and embedding weaknesses | Not applicable: no vector store. |
 | LLM09 Misinformation | Every classification and mapping response carries a disclaimer and a low-confidence flag calibrated on out-of-fold predictions. Corrections require human review. |
-| LLM10 Unbounded consumption | Text and body size caps, `top_k` caps, per-token submission limit (20 per minute), pending-queue cap, lockout. A spend cap will be required before any paid API is used. |
+| LLM10 Unbounded consumption | Text and body size caps, `top_k` caps, per-token submission limit (20 per minute), pending-queue cap, lockout. For paid calls: no API call without `--yes`, a projected-cost refusal, a hard spend cap that stops new calls, unpriced models refused, `max_tokens` bounded, and a cache so reruns are free. |
 
 ## OWASP MCP Top 10 (v0.1), the two items I verified
 
@@ -51,3 +51,6 @@ No LLM is called by the current code, so several risks do not apply yet. They ar
 5. **The lockout is per client address.** On localhost every client looks the same, so repeated failures from one process also lock out the UI for 60 s. Tokens have 256 bits of entropy, so brute force is not the realistic threat; the lockout mostly limits noise.
 6. **Tokens are not scoped to catalogs** and do not expire. Revoke tokens you no longer need.
 7. **Any process running as your user can read the database and tokens file.** The hashes protect copies of the file, not a local attacker with your account.
+8. **The evaluation cache is not integrity-protected.** Someone who can write `~/.scriptorium/evals/cache.db` could change cached answers, and `--replay` would then reproduce the altered results. Treat a replayed number as only as trustworthy as that file.
+9. **The spend cap can be overshot** by the calls already in flight when it is reached (at most `--workers`), and cost figures come from recorded token counts at listed prices, not from the invoice.
+10. **Prompt-injection resistance of the models is unmeasured** until the robustness task exists and has been run.

@@ -12,7 +12,7 @@ Policy-as-code and control mapping for AI governance. Public data only; no emplo
 | Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Stage 2, results below |
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
-| Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Not started |
+| Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Control-mapping task built and tested with fake clients; **no real run yet, so no LLM results**. Other tasks not started |
 
 ### Design notes
 
@@ -46,6 +46,27 @@ How to read this:
 - Several families score 0 on the test set (CA, PL, PS, RA). Per-family scores rest on very few test records: AT has 1, MA and PS have 2, MP and SR have 3, PL and PT have 4. Families with fewer than 5 test records are flagged `low_support` in the JSON and should not be read as reliable.
 - Cross-validation and test scores agree closely, which suggests the model was not tuned to the test split.
 - Family prediction is a stand-in for control mapping. It does not show the model can pick the exact control.
+
+## LLM evaluation: control mapping (built, not yet run)
+
+`scriptorium.evals` asks a Claude model to put each held-out NIST requirement into a control family and scores it on the **same 184 items** as the scikit-learn baseline, with a paired comparison. **No LLM result exists yet.** Every number will come from a real run with your own credentials, and none is published here until then.
+
+```bash
+uv sync --extra llm
+export ANTHROPIC_API_KEY=...      # in your own shell; it is never written to the repo, logs, cache or reports
+uv run python -m scriptorium.evals plan mapping --model claude-sonnet-5-5               # no API call; shows a rough projection
+uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --limit 20 --yes   # a small trial first
+uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --yes          # full run, capped at $5 by default
+uv run python -m scriptorium.evals run  mapping --model claude-sonnet-5-5 --replay       # reproduce from the cache, no API calls
+```
+
+- **Prompts are versioned files** in `prompts/mapping/`. A report records the prompt version and its SHA-256, the model, parameters, date, token counts and cost.
+- **Cache:** answers are stored in `~/.scriptorium/evals/cache.db`, keyed by model, prompt version and hash, parameters and input. Re-running is free, and `--replay` never calls the API (a miss is reported, never filled in).
+- **Output must match the schema** (one of the 20 family codes, nothing else). Invalid JSON, a wrong value, an extra field, a refusal or a truncated reply counts as a wrong answer and is never repaired.
+- **Spend controls:** `run` refuses to call the API without `--yes`, refuses if the rough projection exceeds `--budget-usd` (default 5), and stops making new calls when recorded spend reaches the cap. At most `--workers` calls already in flight can finish after that, so the cap can be overshot by a few calls. Projections are offline estimates, not quotes, and prices are copied from a dated reference (`budget.py`) that can go stale. Unpriced models are refused.
+- **What is sent:** NIST requirement statements (public domain) and the family list. SCF text is never sent.
+- **Model settings:** thinking is left adaptive at `low` effort by default (`--thinking off` sends the Sonnet 5.5 thinking-off setting). Sampling parameters, forced tool choice and assistant prefill are not sent, because these models reject them. Model output is not deterministic, so a fresh run can differ from a cached one.
+- **Verified so far** with fake clients and a loopback server standing in for the API: request shape on the wire, error handling, cache, budget, replay and scoring. **Not verified against the real API.**
 
 ## Optional: Secure Controls Framework (SCF)
 
