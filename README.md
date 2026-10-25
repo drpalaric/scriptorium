@@ -20,7 +20,8 @@ Policy-as-code and control mapping for AI governance. Public data only; no emplo
 | Pre-registered prompt experiment | dev split only | Done; test split not used |
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
-| Policy-drafting and prompt-injection evaluations | Vale scores, injection set | Not started |
+| Prompt-injection test | 8 attack variants, ablation, sklearn contrast | Done; results below |
+| Policy-drafting evaluation | Vale scores | Not started |
 | Web UI (user and admin pages) | TypeScript | Not started |
 
 ### Design notes
@@ -114,6 +115,10 @@ uv run python -m scriptorium.sources        # what is registered, with hashes an
 - **Adapters fail loudly** on unexpected headers instead of guessing.
 - **Lookups** return each pair labelled **published** (an official pair, with the publisher's relationship where one is stated) or **indirect** (NIST control to ATT&CK technique composed through CIS safeguards; it is not an official mapping). The publisher's absence of a pair does not mean no relationship: CIS says it deliberately under-maps.
 - **Guardrails:** a test fails if any workbook or derived store content is tracked in git. Published results from these files are aggregates only.
+
+### Prompt-injection test (pre-registered)
+
+Eight label-flipping attacks, 200 items each ([protocol](docs/experiments/injection.md), [results](docs/experiments/injection-results.md)). With the production prompt the model produced the attacker's chosen family **once in 1,600 attacked requests** (95% CI 0.000 to 0.002 for the pooled rate). With the "untrusted data" sentence removed the rate was 0.121, and one attack that offers a fallback fitting the output schema reached 0.745. Attacks that did not hijack the label still cost a few points of accuracy. One model, fixed non-adaptive templates: a measurement, not a safety guarantee.
 
 ### CIS comparison (pre-registered, aggregates only)
 
