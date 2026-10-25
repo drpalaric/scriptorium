@@ -20,6 +20,9 @@ web = [
 llm = [
     "anthropic>=2.3.0",
 ]
+crosswalks = [
+    "openpyxl>=3.1.5",
+]
 
 [dependency-groups]
 dev = [
@@ -27,6 +30,7 @@ dev = [
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
     "mcp>=2.3.0",
+    "openpyxl>=3.1.5",
     "pytest>=8",
 ]
 
