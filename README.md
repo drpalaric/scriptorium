@@ -1,5 +1,7 @@
 # Scriptorium
 
+[![CI](https://github.com/drpalaric/scriptorium/actions/workflows/ci.yml/badge.svg)](https://github.com/drpalaric/scriptorium/actions/workflows/ci.yml)
+
 Policy-as-code and control mapping for AI governance. Public data only; no employer material.
 
 **Status: work in progress.** Built and tested: data ingestion, a scikit-learn baseline, an optional SCF loader and crosswalk, an MCP server, a corrections workflow with a hash-chained audit log, a local API, and an LLM evaluation harness with one real run. Not built: the Rego/OPA layer, the Vale rules, the prompt-injection and policy-drafting evaluations, a web UI, and a project site. Every number below comes from a real run, and each result section lists its caveats.
