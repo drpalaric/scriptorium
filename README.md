@@ -2,17 +2,24 @@
 
 Policy-as-code and control mapping for AI governance. Public data only; no employer material.
 
-**Status: Stage 2 (scikit-learn baseline).** The only measured results so far are the scikit-learn baseline below. No LLM has been called, and no LLM results exist yet. Results are added only after real runs.
+**Status: work in progress.** Built and tested: data ingestion, a scikit-learn baseline, an optional SCF loader and crosswalk, an MCP server, a corrections workflow with a hash-chained audit log, a local API, and an LLM evaluation harness with one real run. Not built: the Rego/OPA layer, the Vale rules, the prompt-injection and policy-drafting evaluations, a web UI, and a project site. Every number below comes from a real run, and each result section lists its caveats.
 
-## Planned components
+## What is here
 
 | Layer | Tooling | Status |
 |---|---|---|
-| Data: NIST SP 800-53 rev5 requirement text labelled by control family | OSCAL catalog, `scriptorium.ingest` | Stage 1 |
-| Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Stage 2, results below |
+| Data: NIST SP 800-53 Rev 5 requirement text labelled by control family | OSCAL catalog, `scriptorium.ingest` | Built, tested |
+| Baseline classifier: requirement text to control family | scikit-learn (TF-IDF + linear model) | Built; results below |
+| Optional second catalog and NIST-to-SCF mapping | SCF OSCAL file you download yourself | Built; results are local-only |
+| MCP server: classify, map, queue corrections | `mcp` SDK, stdio | Built, tested |
+| Corrections with approval, held-out gate, rollback, audit chain | SQLite, hash-chained events | Built, tested |
+| Local API with user and admin tokens | FastAPI, loopback only | Built, tested; [security notes](docs/security.md) |
+| LLM evaluation harness (control mapping) | Anthropic API, Pydantic, cache and replay | Built; one real run below |
+| Pre-registered prompt experiment | dev split only | Done; test split not used |
 | Record layer: policy rules carrying control IDs | Rego on OPA, `opa test`, GitHub Actions | Not started |
 | Document layer: lint for LLM-drafted policy text | Vale | Not started |
-| Prompt-engineering eval harness (control mapping, policy drafting, prompt-injection robustness) | Anthropic API, Pydantic, offline replay | Control-mapping task built and run once (see results below). Other tasks not started |
+| Policy-drafting and prompt-injection evaluations | Vale scores, injection set | Not started |
+| Web UI (user and admin pages) | TypeScript | Not started |
 
 ### Design notes
 
