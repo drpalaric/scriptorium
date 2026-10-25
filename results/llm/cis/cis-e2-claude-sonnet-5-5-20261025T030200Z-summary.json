@@ -1,0 +1,72 @@
+{
+ "experiment": "e2",
+ "preregistration": "docs/experiments/cis.md (commit 8651103)",
+ "created_utc": "20261025T030200Z",
+ "model": "claude-sonnet-5-5",
+ "prompt": {
+  "task": "mapping",
+  "version": "v1",
+  "sha256": "d631630734b76f4b9393a4baa1e33712c445ccf8de96f74c5ab6bf78070b5b2c"
+ },
+ "request_parameters": {
+  "effort": "low",
+  "thinking": "adaptive",
+  "max_tokens": 1024
+ },
+ "mode": "live",
+ "allow_cis": true,
+ "items": {
+  "total": 143,
+  "scored": 143
+ },
+ "usage": {
+  "input_tokens": 12511,
+  "output_tokens": 1573,
+  "cache_read_tokens": 99107,
+  "cache_write_tokens": 2852,
+  "recorded_cost_usd_all_answers": 0.067703,
+  "spent_this_run_usd": 0.067703,
+  "live_calls": 143,
+  "answers_from_cache": 0
+ },
+ "input_preprocessing": {
+  "cross_references_replaced": 1,
+  "sent_to_model": "description text only, quoted as data"
+ },
+ "results": {
+  "n_scored": 143,
+  "n_clusters": 18,
+  "lenient": {
+   "llm": 0.8601398601398601,
+   "sklearn": 0.5104895104895105,
+   "llm_minus_sklearn": 0.3496503496503496,
+   "llm_minus_sklearn_ci95": [
+    0.2448866213151928,
+    0.4567041619797525
+   ],
+   "only_llm": 57,
+   "only_sklearn": 7,
+   "both": 66,
+   "neither": 13
+  },
+  "strict_single_family": {
+   "n": 86,
+   "llm": 0.8255813953488372,
+   "sklearn": 0.4418604651162791,
+   "llm_minus_sklearn": 0.38372093023255816,
+   "llm_minus_sklearn_ci95": [
+    0.24736456438245402,
+    0.5357424812030075
+   ]
+  },
+  "h1_supported": true,
+  "status_counts": {
+   "ok": 143
+  },
+  "reference": {
+   "random_family_lenient": 0.07832167832167831,
+   "most_frequent_family_lenient": 0.22377622377622378,
+   "single_family_items": 86
+  }
+ }
+}

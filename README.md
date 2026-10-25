@@ -113,6 +113,10 @@ uv run python -m scriptorium.sources        # what is registered, with hashes an
 - **Lookups** return each pair labelled **published** (an official pair, with the publisher's relationship where one is stated) or **indirect** (NIST control to ATT&CK technique composed through CIS safeguards; it is not an official mapping). The publisher's absence of a pair does not mean no relationship: CIS says it deliberately under-maps.
 - **Guardrails:** a test fails if any workbook or derived store content is tracked in git. Published results from these files are aggregates only.
 
+### CIS comparison (pre-registered, aggregates only)
+
+A pre-registered comparison against the CIS Controls ([protocol](docs/experiments/cis.md), [results](docs/experiments/cis-results.md)). **Primary result (E2):** on CIS safeguard text that neither system had seen, the LLM's lenient accuracy at predicting the NIST family was 0.860 against sklearn's 0.510 (difference +0.350, 95% CI +0.245 to +0.457 over 18 clusters), so the advantage seen on NIST text did not shrink on CIS wording. The model may have seen the public CIS-to-NIST mapping, and the lenient metric has known quirks, both stated in the write-up. Plain TF-IDF retrieval between CIS and NIST found the right NIST control in the top 10 for 48% of safeguards (random: 2.5%), a weak crosswalk. This repository holds aggregate numbers only; the CIS workbooks and everything derived from them stay local. CIS Controls are © Center for Internet Security, [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).
+
 ## Optional: Secure Controls Framework (SCF)
 
 Scriptorium can optionally read a copy of the [Secure Controls Framework](https://securecontrolsframework.com) (SCF) that **you download yourself**, to classify requirements into SCF domains and to map between SCF and NIST. This is an optional input, not part of the core pipeline.

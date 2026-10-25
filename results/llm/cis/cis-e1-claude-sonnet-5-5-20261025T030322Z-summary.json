@@ -1,0 +1,88 @@
+{
+ "experiment": "e1",
+ "preregistration": "docs/experiments/cis.md (commit 8651103)",
+ "created_utc": "20261025T030322Z",
+ "model": "claude-sonnet-5-5",
+ "prompt": {
+  "task": "cis_control",
+  "version": "v1",
+  "sha256": "65c974fc7c4f460c7f89c36fb81674fbbeec7a38491e96474fbf55252e3d83f6"
+ },
+ "request_parameters": {
+  "effort": "low",
+  "thinking": "adaptive",
+  "max_tokens": 1024
+ },
+ "mode": "live",
+ "allow_cis": true,
+ "items": {
+  "total": 153,
+  "scored": 153
+ },
+ "usage": {
+  "input_tokens": 13305,
+  "output_tokens": 1530,
+  "cache_read_tokens": 99979,
+  "cache_write_tokens": 2684,
+  "recorded_cost_usd_all_answers": 0.068616,
+  "spent_this_run_usd": 0.068616,
+  "live_calls": 153,
+  "answers_from_cache": 0
+ },
+ "input_preprocessing": {
+  "cross_references_replaced": 1,
+  "sent_to_model": "description text only, quoted as data"
+ },
+ "results": {
+  "llm": {
+   "n_scored": 153,
+   "accuracy": 0.9738562091503268,
+   "macro_f1": 0.9751571669360816,
+   "ci95": {
+    "accuracy": [
+     0.9477124183006536,
+     0.9934640522875817
+    ],
+    "macro_f1": [
+     0.9427779669768647,
+     0.9950184102230887
+    ]
+   }
+  },
+  "comparison_with_sklearn_cv": {
+   "n_paired": 153,
+   "sklearn": {
+    "accuracy": 0.7058823529411765,
+    "macro_f1": 0.6872994625200507
+   },
+   "llm_minus_sklearn": {
+    "accuracy_diff": 0.26797385620915026,
+    "macro_f1_diff": 0.28785770441603087
+   },
+   "llm_minus_sklearn_ci95": {
+    "accuracy_diff": [
+     0.20261437908496727,
+     0.33986928104575165
+    ],
+    "macro_f1_diff": [
+     0.22710741077723504,
+     0.37936933895054964
+    ]
+   },
+   "both_right": 107,
+   "only_llm_right": 42,
+   "only_sklearn_right": 1,
+   "neither_right": 3
+  },
+  "sklearn_cv": {
+   "folds": 5,
+   "seed": 20261025,
+   "config": {
+    "clf": "linear_svm",
+    "ngram_max": 1,
+    "C": 10.0,
+    "class_weight": "balanced"
+   }
+  }
+ }
+}
