@@ -1,0 +1,13 @@
+All user accounts must be approved by a manager before they are created.
+
+Accounts of employees who leave the company must be disabled within 24 hours.
+
+User accounts must be approved by a manager before creation.
+
+Backups of critical data are taken every night and tested every quarter.
+
+Critical data is backed up nightly, and the backups are tested each quarter.
+
+Security awareness training is required for all employees every year.
+
+Administrator actions are logged and the logs are reviewed every month.
