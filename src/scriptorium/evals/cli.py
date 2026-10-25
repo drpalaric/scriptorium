@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from scriptorium import baseline, ingest, paths
-from scriptorium.evals import cis_cli, context, injection, mapping, splits
+from scriptorium.evals import cis_cli, context, injection, mapping, overlap_eval, splits
 from scriptorium.evals.budget import Budget, EST_OUTPUT_BY_EFFORT, price_for, projected_cost
 from scriptorium.evals.llm import AnthropicClient, CachedClient, EFFORTS, LazyClient, LLMError, ResponseCache, THINKING_MODES, cache_key
 from scriptorium.evals.prompts import load_prompt
@@ -69,6 +69,7 @@ def _args(argv):
     r.add_argument("--out", type=Path, default=None, help="report directory (default: ~/.scriptorium/evals/reports)")
     cis_cli.add_parser(sub)
     injection.add_parser(sub)
+    overlap_eval.add_parser(sub)
     c = sub.add_parser("compare", help="paired comparison of two cached runs (no API call)")
     _common(c)
     c.add_argument("--a", required=True, help="reference prompt version")
@@ -136,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
         return cis_cli.run(a)
     if a.cmd == "injection":
         return injection.run(a)
+    if a.cmd == "overlap":
+        return overlap_eval.run(a)
     try:
         if a.cmd == "compare":
             return _cmd_compare(a)
